@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+beautifulsoup4
+httpx
+pandas
+openpyxl
+ddgs
+python-dotenv
+ddddocr
