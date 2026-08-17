@@ -255,6 +255,9 @@ def export_leads(request: ExportRequest) -> FileResponse:
     df.insert(5, "Last Name", [str(n).title() for n in last_names])
     df.drop(columns=["contractor_name", "state"], inplace=True)
     
+    # Format company name to Title Case to prevent ALL CAPS
+    df["company_name"] = df["company_name"].apply(lambda x: str(x).title() if pd.notna(x) else x)
+    
     # Map headers to exact requested format
     header_mapping = {
         "license_type": "Code",
