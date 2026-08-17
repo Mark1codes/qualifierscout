@@ -80,13 +80,22 @@ function getLicenseTypes(state: string): string[] {
 }
 
 export function App() {
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem('qs_settings');
+    return saved ? JSON.parse(saved) : {
+      defaultExportFormat: 'csv',
+      defaultMaxRecords: 50,
+      enableGhostHunterDefault: true,
+    };
+  });
+
   const [activeTab, setActiveTab] = useState("Scraper");
   const [state, setState] = useState("North Carolina");
   const [licenseType, setLicenseType] = useState("General Contractor");
   const [city, setCity] = useState("Charlotte");
   const [licenseStatus, setLicenseStatus] = useState("Active");
-  const [maxRecords, setMaxRecords] = useState<number | "">(50);
-  const [enrichLeads, setEnrichLeads] = useState(true);
+  const [maxRecords, setMaxRecords] = useState<number | "">(settings.defaultMaxRecords);
+  const [enrichLeads, setEnrichLeads] = useState(settings.enableGhostHunterDefault);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [filterState, setFilterState] = useState("all");
@@ -649,23 +658,82 @@ export function App() {
                 </div>
               </div>
               <div className="quality-actions" style={{ padding: "2rem", display: "flex", gap: "1rem" }}>
-                <button onClick={() => exportLeads("csv", true)} className="outline-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px" }}><Download size={16} /> Export Verified as CSV</button>
-                <button onClick={() => exportLeads("xlsx", true)} className="outline-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px" }}><FileSpreadsheet size={16} /> Export Verified as Excel</button>
-                <button onClick={() => exportLeads("csv", false)} className="ghost-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px" }}><Download size={16} /> Export All as CSV</button>
+                <button onClick={() => exportLeads(settings.defaultExportFormat as "csv" | "xlsx", true)} className="outline-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px", backgroundColor: '#06D1D4', color: '#0F172A', border: 'none' }}>
+                  <Download size={16} /> Export Verified as {settings.defaultExportFormat.toUpperCase()}
+                </button>
+                <button onClick={() => exportLeads(settings.defaultExportFormat === "csv" ? "xlsx" : "csv", true)} className="outline-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px" }}>
+                  <FileSpreadsheet size={16} /> Export Verified as {settings.defaultExportFormat === "csv" ? "Excel" : "CSV"}
+                </button>
+                <button onClick={() => exportLeads(settings.defaultExportFormat as "csv" | "xlsx", false)} className="ghost-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px" }}>
+                  <Download size={16} /> Export All ({settings.defaultExportFormat.toUpperCase()})
+                </button>
               </div>
             </section>
           )}
 
           {activeTab === "Settings" && (
-            <section className="panel table-panel">
-              <div className="table-toolbar">
-                <div>
-                  <h2>Settings</h2>
-                  <p>Global scraper configuration goes here.</p>
+            <section className="main-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+              <div className="panel settings-panel">
+                <PanelTitle title="Application Preferences" />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1rem' }}>
+                  <Field label="Default Export Format">
+                    <select 
+                      value={settings.defaultExportFormat} 
+                      onChange={(e) => {
+                        const newSettings = {...settings, defaultExportFormat: e.target.value};
+                        setSettings(newSettings);
+                        localStorage.setItem('qs_settings', JSON.stringify(newSettings));
+                      }}
+                    >
+                      <option value="csv">CSV Document (.csv)</option>
+                      <option value="xlsx">Excel Workbook (.xlsx)</option>
+                    </select>
+                  </Field>
+                  <Field label="Default Max Records">
+                    <input 
+                      type="number" 
+                      value={settings.defaultMaxRecords} 
+                      onChange={(e) => {
+                        const newSettings = {...settings, defaultMaxRecords: parseInt(e.target.value) || 50};
+                        setSettings(newSettings);
+                        localStorage.setItem('qs_settings', JSON.stringify(newSettings));
+                        setMaxRecords(newSettings.defaultMaxRecords);
+                      }} 
+                    />
+                  </Field>
+                  <label className="checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={settings.enableGhostHunterDefault} 
+                      onChange={(e) => {
+                        const newSettings = {...settings, enableGhostHunterDefault: e.target.checked};
+                        setSettings(newSettings);
+                        localStorage.setItem('qs_settings', JSON.stringify(newSettings));
+                        setEnrichLeads(newSettings.enableGhostHunterDefault);
+                      }}
+                      style={{ accentColor: '#06D1D4', width: '18px', height: '18px' }}
+                    />
+                    <span style={{ fontSize: '0.9rem', color: '#E2E8F0', fontWeight: 500 }}>Enable Ghost Hunter by Default</span>
+                  </label>
                 </div>
               </div>
-              <div style={{ padding: "2rem" }}>
-                <p>Settings panel is under construction.</p>
+
+              <div className="panel settings-panel">
+                <PanelTitle title="API Integrations" />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1rem' }}>
+                  <Field label="Apollo API Key">
+                    <input type="password" value="**************" disabled style={{ opacity: 0.7 }} />
+                    <small style={{ display: 'block', marginTop: '6px', color: '#64748B' }}>Configured securely in backend environment variables.</small>
+                  </Field>
+                  <Field label="ZeroBounce API Key">
+                    <input type="password" value="**************" disabled style={{ opacity: 0.7 }} />
+                    <small style={{ display: 'block', marginTop: '6px', color: '#64748B' }}>Configured securely in backend environment variables.</small>
+                  </Field>
+                  <Field label="LinkedIn Credentials">
+                    <input type="password" value="**************" disabled style={{ opacity: 0.7 }} />
+                    <small style={{ display: 'block', marginTop: '6px', color: '#64748B' }}>Configured securely in backend environment variables.</small>
+                  </Field>
+                </div>
               </div>
             </section>
           )}
