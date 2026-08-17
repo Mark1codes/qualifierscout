@@ -14,10 +14,11 @@ QualifierScout is a professional B2B lead generation and data triangulation plat
 ---
 
 ## 🛠 Prerequisites
-Before running the application on another machine, ensure you have the following installed:
-- **Git** ([Download Git](https://git-scm.com/downloads))
-- **Python 3.10+** ([Download Python](https://www.python.org/downloads/))
-- **Node.js 18+** ([Download Node.js](https://nodejs.org/))
+Before running the application on your own machine, ensure you have the following installed:
+- **VScode** (Download VScode)(https://code.visualstudio.com/download?_exp_download=d53503e735) YT Tutorial: https://www.youtube.com/watch?v=DA03DODTP5w 
+- **Git** ([Download Git](https://git-scm.com/downloads)) YT Tutorial: https://www.youtube.com/watch?v=FWDPqistXd4
+- **Python 3.10+** ([Download Python](https://www.python.org/downloads/))  YT Tutorial:youtube.com/watch?si=ARMUMrvOlnFqU7ro&v=UN38d21cbBg&feature=youtu.be
+- **Node.js 18+** ([Download Node.js](https://nodejs.org/))  YT Tutorial:https://www.youtube.com/watch?v=-9baVMhbHPg
 
 ---
 
