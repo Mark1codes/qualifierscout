@@ -73,6 +73,24 @@ const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
     "Mold Remediation Contractor",
     "Water Well Driller",
   ],
+  California: [
+    "General Contractor",
+    "Building Contractor",
+    "Residential Contractor",
+    "General Engineering",
+    "Electrical Contractor",
+    "HVAC Contractor",
+    "Plumbing Contractor",
+    "Roofing Contractor",
+  ],
+  Florida: [
+    "General Contractor",
+    "Building Contractor",
+    "Residential Contractor",
+    "Roofing Contractor",
+    "HVAC Contractor",
+    "Plumbing Contractor",
+  ]
 };
 
 function getLicenseTypes(state: string): string[] {
