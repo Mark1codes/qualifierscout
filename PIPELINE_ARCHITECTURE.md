@@ -46,8 +46,11 @@ Each state has a tailored extraction method to maximize Apollo triangulation suc
    * **Extraction:** Headless browser automation (Playwright) navigating the state portal.
    * **Apollo Sync (Ghost Hunter):** New Mexico records often lack clear company entities. Before sending data to Apollo, the pipeline triggers a preliminary LinkedIn Search to find the individual's current "Employer", which is then injected as the `company_name` for Apollo to successfully triangulate.
 6. **California (CSLB)**
-   * **Extraction:** API-driven extraction fetching business entities and license classifications.
-   * **Apollo Sync:** Readily provides clear business entity names, which map directly to Apollo's B2B search parameters with high success rates.
+   * **Extraction:** Playwright browser automation navigating CSLB's Online Services portal (`cslb.ca.gov`). Submits search queries via city/zip code mappings, capturing active general and specialty contractors alongside company contact details.
+   * **Apollo Sync:** Provides clear business and sole-proprietorship entity names, mapping directly to Apollo's B2B search parameters with high success rates.
+7. **Nevada (NSCB)**
+   * **Extraction:** Playwright browser automation navigating the Nevada State Contractors Board portal (`app.nvcontractorsboard.com`). For corporate entity records, the scraper executes deep detail-page navigation to extract individual Officers and Qualifiers (e.g., *Mohammad Hisham Khaleel*).
+   * **Apollo Sync:** Provides both individual Principal/Qualifier names and corporate entity names, allowing Apollo to accurately match high-level decision-makers and retrieve direct work emails and phones.
 
 ---
 
