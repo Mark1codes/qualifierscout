@@ -16,6 +16,7 @@ class ScrapeStartRequest(BaseModel):
     license_status: str = Field(default="Active")
     max_records: int = Field(default=50, ge=1, le=500)
     enrich_leads: bool = Field(default=True)
+    individuals_only: bool = Field(default=False)
 
 
 class ScrapeStartResponse(BaseModel):
@@ -30,6 +31,7 @@ class LeadUpdateRequest(BaseModel):
 class ExportRequest(BaseModel):
     format: Literal["csv", "xlsx"] = "csv"
     verified_only: bool = True
+    individuals_only: bool = False
     run_id: int | None = None
     state: str | None = None
     city: str | None = None

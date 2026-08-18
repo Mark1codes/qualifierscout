@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
 from pathlib import Path
+from typing import Any
 
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
@@ -25,6 +28,63 @@ CSLB_LICENSE_TYPES = {
 BASE_URL = "https://www.cslb.ca.gov"
 SEARCH_URL = f"{BASE_URL}/OnlineServices/CheckLicenseII/ZipCodeSearch.aspx"
 
+CORP_INDICATORS = {
+    "INC", "LLC", "CORP", "CORPORATION", "CO", "COMPANY", "LTD", "LIMITED", "PA", "PC", "PLC",
+    "CONSTRUCTION", "ROOFING", "PLUMBING", "HVAC", "ELECTRIC", "ELECTRICAL", "DEVELOPMENT",
+    "ENTERPRISES", "PARTNERS", "PROPERTIES", "CONTRACTING", "SOLUTIONS", "DESIGN", "DESIGNS",
+    "ASSOCIATES", "VENTURES", "HOLDINGS", "INDUSTRIES", "SYSTEMS", "CONTRACTOR", "CONTRACTORS",
+    "REMODELING", "SHUTTERS", "WINDOWS", "PAVING", "ENGINEERING", "MASONRY", "RENOVATION",
+    "RENOVATIONS", "SERVICES", "SERVICE", "BUILD", "BUILDERS", "GROUP", "AIR", "CONDITIONING"
+}
+
+
+CA_CITY_ZIPS = {
+    "Los Angeles": "90012",
+    "San Francisco": "94102",
+    "San Diego": "92101",
+    "San Jose": "95113",
+    "Sacramento": "95814",
+    "Fresno": "93721",
+    "Oakland": "94612",
+    "Bakersfield": "93301",
+    "Anaheim": "92805",
+    "Santa Ana": "92701",
+    "Riverside": "92501",
+    "Stockton": "95202",
+    "Irvine": "92614",
+    "Long Beach": "90802",
+}
+
+
+def parse_california_name(name_raw: str) -> tuple[str, str]:
+    """
+    Parses a California CSLB name string into (contractor_name, company_name).
+    - 'SMITH, JOHN DAVID' -> contractor_name='John David Smith', company_name='SMITH, JOHN DAVID'
+    - 'PACIFIC ROOFING CORP' -> contractor_name='', company_name='PACIFIC ROOFING CORP'
+    """
+    name_clean = name_raw.strip()
+    if not name_clean:
+        return "", ""
+
+    words = set(re.findall(r"\b[A-Za-z0-9]+\b", name_clean.upper()))
+    is_corporate = bool(words & CORP_INDICATORS)
+
+    if "," in name_clean:
+        parts = [p.strip() for p in name_clean.split(",", 1)]
+        last_part = parts[0]
+        first_part = parts[1] if len(parts) > 1 else ""
+
+        if is_corporate:
+            return "", name_clean
+        else:
+            contractor_name = f"{first_part} {last_part}".strip()
+            return contractor_name, name_clean
+
+    if is_corporate:
+        return "", name_clean
+    else:
+        return name_clean, name_clean
+
 
 class CaliforniaScraper:
     name = "California CSLB"
@@ -39,6 +99,9 @@ class CaliforniaScraper:
         if not records:
             log("Live source returned no records or was blocked.", "warning")
 
+        if request.individuals_only:
+            records = [r for r in records if r.get("contractor_name")]
+
         records = records[: request.max_records]
         raw_path = self.raw_dir / f"run_{run_id}_california_raw.json"
         raw_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
@@ -48,45 +111,34 @@ class CaliforniaScraper:
     async def _try_public_search(self, request: ScrapeStartRequest, log) -> list[dict]:
         lic_type_code = CSLB_LICENSE_TYPES.get(request.license_type, CSLB_LICENSE_TYPES["default"])
         city = (request.city or "Los Angeles").title()
+        zip_code_param = CA_CITY_ZIPS.get(city, "90012")
         
         records = []
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
+                browser = await p.chromium.launch(**self._browser_launch_options())
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     viewport={"width": 1920, "height": 1080}
                 )
                 page = await context.new_page()
-                # Simple stealth to bypass basic headless checks
                 await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 
-                log(f"Navigating to CSLB Search for {city}...")
-                # Must visit base page first and click the link to establish session cookies/referer
+                log(f"Navigating to CSLB Search for {city} (Zip: {zip_code_param})...")
                 await page.goto(f"{BASE_URL}/OnlineServices/CheckLicenseII/CheckLicense.aspx", timeout=30000)
-                await page.wait_for_selector('a[href="ZipCodeSearch.aspx"]', timeout=15000)
-                await page.click('a[href="ZipCodeSearch.aspx"]')
+                await page.wait_for_selector('a[href*="ZipCodeSearch.aspx"]', timeout=15000)
+                await page.click('a[href*="ZipCodeSearch.aspx"]')
                 
-                # Wait for form to load
-                await page.wait_for_selector('#txtCity', timeout=15000)
+                await page.wait_for_selector('#txtZipCode', timeout=15000)
                 
-                # Fill out the form
-                log(f"Filling out search criteria: City={city}, Type={lic_type_code}...")
-                await page.fill('#txtCity', city)
+                log(f"Filling search criteria: ZipCode={zip_code_param}, Type={lic_type_code}...")
+                await page.fill('#txtZipCode', zip_code_param)
                 await page.select_option('#ddlLicenseType', value=lic_type_code)
                 
-                # Click Search
-                log("Submitting search...")
+                log("Submitting CSLB search...")
                 await page.click('#MainContent_btnZipCodeSearch')
+                await page.wait_for_timeout(4000)
                 
-                # Wait for results table or no results message
-                try:
-                    await page.wait_for_selector('table, span:has-text("No records")', timeout=20000)
-                except Exception:
-                    log("Timeout waiting for results to load.", "error")
-                    await browser.close()
-                    return []
-                    
                 content = await page.content()
                 soup = BeautifulSoup(content, 'html.parser')
                 
@@ -119,11 +171,12 @@ class CaliforniaScraper:
                             if not lic_num or not name:
                                 continue
                                 
-                            # CSLB search page only shows active matching records by default
+                            contractor_name, company_name = parse_california_name(name)
+
                             records.append({
                                 "source_url": BASE_URL,
-                                "contractor_name": name, # Map Business Name here so it's not blank in the CSV export
-                                "company_name": "",
+                                "contractor_name": contractor_name,
+                                "company_name": company_name,
                                 "license_number": lic_num,
                                 "license_type": request.license_type,
                                 "license_status": "Active",
@@ -139,5 +192,22 @@ class CaliforniaScraper:
                 return records
                 
         except Exception as exc:
-            log(f"California CSLB scrape failed: {exc}", "error")
+            log(f"California CSLB scrape failed ({type(exc).__name__}): {exc}", "error")
             return []
+
+    @staticmethod
+    def _browser_launch_options() -> dict[str, Any]:
+        options: dict[str, Any] = {"headless": True}
+        if sys.platform != "win32":
+            return options
+
+        chrome_paths = (
+            Path(os.environ.get("PROGRAMFILES", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        )
+        for chrome_path in chrome_paths:
+            if chrome_path.is_file():
+                options["executable_path"] = str(chrome_path)
+                break
+        return options

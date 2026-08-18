@@ -44,6 +44,7 @@ const CITIES_BY_STATE: Record<string, string[]> = {
   "Georgia": ["Atlanta", "Augusta", "Savannah", "Columbus", "Macon", "Athens", "Sandy Springs", "South Fulton", "Roswell", "Johns Creek", "Warner Robins", "Albany", "Alpharetta", "Marietta", "Stonecrest", "Smyrna", "Valdosta", "Brookhaven", "Dunwoody", "Newnan", "Gainesville", "Peachtree Corners", "Mableton", "Milton", "Peachtree City", "Douglasville", "Rome", "East Point", "Tucker", "Woodstock", "Hinesville", "Canton", "Statesboro", "Dalton", "Martinez", "Duluth", "Redan", "Evans", "Covington", "Sugar Hill", "Griffin", "Decatur", "Pooler", "Carrollton", "Acworth", "Cartersville", "Suwanee", "Perry", "Snellville", "Thomasville"],
   "Texas": ["Houston", "Austin", "Dallas", "San Antonio", "Fort Worth", "El Paso", "Arlington", "Corpus Christi", "Plano", "Laredo", "Lubbock", "Garland", "Irving", "Amarillo", "Grand Prairie", "Brownsville", "McKinney", "Frisco", "Pasadena", "Mesquite", "Killeen", "McAllen", "Carrollton", "Midland", "Waco", "Denton", "Abilene", "Odessa", "Beaumont", "Round Rock", "The Woodlands", "Richardson", "Pearland", "College Station", "Wichita Falls", "Lewisville", "Tyler", "San Angelo", "League City", "Allen", "Sugar Land", "Edinburg", "Mission", "Longview", "Bryan", "Baytown", "Pharr", "Temple", "Missouri City", "Flower Mound"],
   "New Mexico": ["Albuquerque", "Las Cruces", "Rio Rancho", "Santa Fe", "Roswell", "Farmington", "Clovis", "Hobbs", "Alamogordo", "Carlsbad", "Gallup", "Los Lunas", "Sunland Park", "Deming", "Artesia", "Las Vegas", "Portales", "Silver City", "Taos", "Grants", "Ruidoso", "Socorro", "Espanola", "Lovington", "Belen", "Bernalillo", "Corrales", "Bloomfield", "Aztec", "Truth or Consequences", "Los Alamos", "Raton", "Edgewood", "Milan", "Anthony", "Santa Rosa", "Eunice", "Tucumcari", "Tularosa", "Jal", "Mesilla", "Dexter", "Bayard", "Chaparral", "Santa Teresa", "Vado", "Zuni Pueblo", "Kirtland", "Moriarty", "Estancia", "Peralta", "Bosque Farms", "Hatch", "Lordsburg", "Magdalena", "Angel Fire", "Eagle Nest", "Red River", "Pecos", "Jemez Springs", "Mescalero", "Vaughn", "Carrizozo", "Tijeras"],
+  "Nevada": ["Las Vegas", "Reno", "Henderson", "North Las Vegas", "Sparks", "Carson City", "Elko", "Boulder City", "Mesquite", "Fallon", "Fernley", "Pahrump", "Incline Village"],
 };
 
 const ALL_LICENSE_TYPES = [
@@ -64,7 +65,16 @@ const ALL_LICENSE_TYPES = [
 
 
 const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
-  
+  Nevada: [
+    "General Contractor",
+    "Building Contractor",
+    "Residential Contractor",
+    "General Engineering",
+    "Electrical Contractor",
+    "HVAC Contractor",
+    "Plumbing Contractor",
+    "Roofing Contractor",
+  ],
   Texas: [
     "HVAC Contractor",
     "Electrical Contractor",
@@ -462,6 +472,7 @@ export function App() {
                       <option>Georgia</option>
                       <option>Texas</option>
                       <option>New Mexico</option>
+                      <option>Nevada</option>
                     </select>
                   </Field>
                   <Field label="Trade / License Type">

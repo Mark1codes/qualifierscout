@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import sqlite3
 from pathlib import Path
 
@@ -40,6 +41,10 @@ try:
     from app.scrapers.new_mexico import NewMexicoScraper
 except ImportError:
     NewMexicoScraper = None
+try:
+    from app.scrapers.nevada import NevadaScraper
+except ImportError:
+    NevadaScraper = None
 
 SCRAPER_REGISTRY = {
     "North Carolina": NorthCarolinaScraper,
@@ -48,6 +53,7 @@ SCRAPER_REGISTRY = {
     "Georgia": GeorgiaScraper,
     "Texas": TexasScraper,
     "New Mexico": NewMexicoScraper,
+    "Nevada": NevadaScraper,
 }
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -63,6 +69,7 @@ EXPORT_COLUMNS = [
     "email",
     "phone",
     "linkedin",
+    "city",
     "state",
 ]
 
@@ -129,6 +136,24 @@ def get_run(run_id: int) -> dict:
     return payload
 
 
+STATE_MAP = {
+    "Florida": ["Florida", "FL"],
+    "California": ["California", "CA"],
+    "Georgia": ["Georgia", "GA"],
+    "Texas": ["Texas", "TX"],
+    "North Carolina": ["North Carolina", "NC"],
+    "New Mexico": ["New Mexico", "NM"],
+    "Nevada": ["Nevada", "NV"],
+    "FL": ["Florida", "FL"],
+    "CA": ["California", "CA"],
+    "GA": ["Georgia", "GA"],
+    "TX": ["Texas", "TX"],
+    "NC": ["North Carolina", "NC"],
+    "NM": ["New Mexico", "NM"],
+    "NV": ["Nevada", "NV"],
+}
+
+
 @app.get("/leads")
 def get_leads(
     state: str | None = None,
@@ -140,9 +165,11 @@ def get_leads(
 ) -> dict:
     where = []
     params: list[object] = []
-    if state:
-        where.append("state = ?")
-        params.append(state)
+    if state and state != "all":
+        st_list = STATE_MAP.get(state, [state])
+        placeholders = ", ".join(["?"] * len(st_list))
+        where.append(f"state IN ({placeholders})")
+        params.extend(st_list)
     if license_type:
         where.append("license_type LIKE ?")
         params.append(f"%{license_type}%")
@@ -207,8 +234,10 @@ def export_leads(request: ExportRequest) -> FileResponse:
         where_clauses.append("run_id = ?")
         params.append(request.run_id)
     if request.state and request.state != "all":
-        where_clauses.append("state = ?")
-        params.append(request.state)
+        st_list = STATE_MAP.get(request.state, [request.state])
+        placeholders = ", ".join(["?"] * len(st_list))
+        where_clauses.append(f"state IN ({placeholders})")
+        params.extend(st_list)
     if request.city and request.city != "all":
         where_clauses.append("city = ?")
         params.append(request.city)
@@ -225,24 +254,47 @@ def export_leads(request: ExportRequest) -> FileResponse:
 
     df = pd.DataFrame(rows, columns=EXPORT_COLUMNS)
     
-    # Split contractor_name into First Name and Last Name
+    # Split contractor_name (or individual company_name fallback) into First Name and Last Name
     first_names = []
     last_names = []
+    
+    corp_indicators = {
+        "INC", "LLC", "CORP", "CORPORATION", "CO", "COMPANY", "LTD", "LIMITED", "PA", "PC", "PLC",
+        "CONSTRUCTION", "ROOFING", "PLUMBING", "HVAC", "ELECTRIC", "ELECTRICAL", "DEVELOPMENT",
+        "ENTERPRISES", "PARTNERS", "PROPERTIES", "CONTRACTING", "SOLUTIONS", "DESIGN", "DESIGNS",
+        "ASSOCIATES", "VENTURES", "HOLDINGS", "INDUSTRIES", "SYSTEMS", "CONTRACTOR", "CONTRACTORS",
+        "REMODELING", "SHUTTERS", "WINDOWS", "PAVING", "ENGINEERING", "MASONRY", "RENOVATION",
+        "RENOVATIONS", "SERVICES", "SERVICE", "BUILD", "BUILDERS", "GROUP", "AIR", "CONDITIONING"
+    }
+
     for i, row in df.iterrows():
-        name = row["contractor_name"]
-        state = row["state"]
+        contractor = str(row.get("contractor_name") or "").strip()
+        company = str(row.get("company_name") or "").strip()
+        state = str(row.get("state") or "").strip()
         
-        if not name:
+        target_name = contractor
+        # Fallback if contractor_name is missing but company_name is an individual person (e.g., "Acosta, Daniel David")
+        if not target_name and company and "," in company:
+            words = set(re.findall(r"\b[A-Za-z0-9]+\b", company.upper()))
+            if not (words & corp_indicators):
+                target_name = company
+
+        if not target_name:
             first_names.append("")
             last_names.append("")
             continue
-            
-        parts = str(name).strip().split(" ")
-        if len(parts) == 1:
-            first_names.append(parts[0])
-            last_names.append("")
+
+        if "," in target_name:
+            # Format: "LAST, FIRST [MIDDLE]"
+            parts = [p.strip() for p in target_name.split(",", 1)]
+            last_names.append(parts[0])
+            first_names.append(parts[1] if len(parts) > 1 else "")
         else:
-            if state == "NM":
+            parts = target_name.split(" ")
+            if len(parts) == 1:
+                first_names.append(parts[0])
+                last_names.append("")
+            elif state == "NM":
                 # NM format: LAST FIRST MIDDLE
                 first_names.append(" ".join(parts[1:]))
                 last_names.append(parts[0])
@@ -254,6 +306,9 @@ def export_leads(request: ExportRequest) -> FileResponse:
     df.insert(4, "First Name", [str(n).title() for n in first_names])
     df.insert(5, "Last Name", [str(n).title() for n in last_names])
     df.drop(columns=["contractor_name", "state"], inplace=True)
+    
+    if request.individuals_only:
+        df = df[df["First Name"].str.strip() != ""]
     
     # Format company name to Title Case to prevent ALL CAPS
     df["company_name"] = df["company_name"].apply(lambda x: str(x).title() if pd.notna(x) else x)
@@ -267,7 +322,9 @@ def export_leads(request: ExportRequest) -> FileResponse:
         "title": "Title",
         "email": "Email",
         "phone": "Number",
-        "linkedin": "LinkedIn Profile"
+        "linkedin": "LinkedIn Profile",
+        "city": "City",
+        "state": "State",
     }
     df.rename(columns=header_mapping, inplace=True)
 
