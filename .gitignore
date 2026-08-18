@@ -46,6 +46,7 @@ Thumbs.db
 # Markdown docs
 *.md
 !README.md
+!PIPELINE_ARCHITECTURE.md
 
 # SQLite DB
 *.db
