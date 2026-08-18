@@ -17,7 +17,6 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
-  UploadCloud,
   Mail,
   Phone as PhoneIcon,
   Linkedin,
@@ -63,9 +62,9 @@ const ALL_LICENSE_TYPES = [
   "Lead Abatement", "Mold Remediation", "Water Damage Restoration",
 ];
 
-// Only show types the state portal actually supports
+
 const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
-  // Texas TDLR only issues company-level licenses for these 5 trades
+  
   Texas: [
     "HVAC Contractor",
     "Electrical Contractor",
@@ -234,41 +233,28 @@ export function App() {
   return (
     <div className={`app-shell ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <aside className="sidebar">
-        <div className="brand" style={{ gap: '0.85rem', alignItems: 'center' }}>
-          {/* Official QualifierScout brand logo */}
-          <svg height="36" width="28" viewBox="0 0 31 40" xmlns="http://www.w3.org/2000/svg">
+        <div className="brand">
+          <div className="brand-mark">
+            <svg height="29" width="23" viewBox="0 0 31 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <g transform="translate(0, 0) rotate(0 15 20)" id="logogram" style={{ opacity: 1 }}>
-              <path fill="#06D1D4" d="M15 0L20.4545 5.33333L0 25.3333V14.6667L15 0Z"/>
-              <path fill="#260AF5" d="M2.90827 28.177L15 40L30 25.3334V14.6667L20.4545 5.33337L0 25.3334L0.0041688 25.3375L20.4545 5.33337V20.6667L11.25 29.6667V20.1324L2.90827 28.177Z"/>
+              <path fill="currentColor" d="M15 0L20.4545 5.33333L0 25.3333V14.6667L15 0Z"/>
+              <path fill="currentColor" opacity=".72" d="M2.90827 28.177L15 40L30 25.3334V14.6667L20.4545 5.33337L0 25.3334L0.0041688 25.3375L20.4545 5.33337V20.6667L11.25 29.6667V20.1324L2.90827 28.177Z"/>
             </g>
           </svg>
-          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'baseline', gap: '0px' }}>
-            <strong style={{ 
-              fontFamily: "'Space Grotesk', sans-serif", 
-              fontWeight: 700, 
-              color: '#F1F5F9', 
-              fontSize: '1.2rem', 
-              letterSpacing: '-0.2px',
-              lineHeight: 1
-            }}>Qualifier</strong>
-            <strong style={{ 
-              fontFamily: "'Space Grotesk', sans-serif", 
-              fontWeight: 700, 
-              color: '#06D1D4', 
-              fontSize: '1.2rem', 
-              letterSpacing: '-0.2px',
-              lineHeight: 1
-            }}>Scout</strong>
+          </div>
+          <div className="brand-copy">
+            <strong>Qualifier<span>Scout</span></strong>
+            <small>Lead intelligence</small>
           </div>
         </div>
         <nav className="nav">
+          <p className="nav-label">Workspace</p>
           {[
             ["Dashboard", LayoutDashboard],
             ["Scraper", Database],
             ["Leads", FileSpreadsheet],
             ["Deduplication", Columns3],
             ["Verification", ShieldCheck],
-            ["Exports", UploadCloud],
             ["Settings", Settings],
           ].map(([label, Icon]) => (
             <button
@@ -276,17 +262,17 @@ export function App() {
               key={label as string}
               onClick={() => setActiveTab(label as string)}
             >
-              <Icon size={18} />
+              <span className="nav-icon"><Icon size={18} /></span>
               <span>{label as string}</span>
               {label === "Verification" && <span className="count">{stats.needs_review}</span>}
             </button>
           ))}
         </nav>
         <div className="plan-box">
-          <small>Workspace</small>
-          <strong>Contractor Records</strong>
+          <div className="plan-box-topline"><span className="plan-status" /> Local workspace</div>
+          <strong>Contractor records</strong>
           <div className="meter"><span style={{ width: `${Math.min(100, stats.total * 2)}%` }} /></div>
-          <p>{stats.total} leads stored locally</p>
+          <p><b>{stats.total}</b> leads stored locally</p>
         </div>
       </aside>
 
@@ -667,28 +653,6 @@ export function App() {
             );
           })()}
 
-          {activeTab === "Exports" && (
-            <section className="panel table-panel">
-              <div className="table-toolbar">
-                <div>
-                  <h2>Exports</h2>
-                  <p>Export your verified leads.</p>
-                </div>
-              </div>
-              <div className="quality-actions" style={{ padding: "2rem", display: "flex", gap: "1rem" }}>
-                <button onClick={() => exportLeads(settings.defaultExportFormat as "csv" | "xlsx", true)} className="outline-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px", backgroundColor: '#06D1D4', color: '#0F172A', border: 'none' }}>
-                  <Download size={16} /> Export Verified as {settings.defaultExportFormat.toUpperCase()}
-                </button>
-                <button onClick={() => exportLeads(settings.defaultExportFormat === "csv" ? "xlsx" : "csv", true)} className="outline-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px" }}>
-                  <FileSpreadsheet size={16} /> Export Verified as {settings.defaultExportFormat === "csv" ? "Excel" : "CSV"}
-                </button>
-                <button onClick={() => exportLeads(settings.defaultExportFormat as "csv" | "xlsx", false)} className="ghost-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px" }}>
-                  <Download size={16} /> Export All ({settings.defaultExportFormat.toUpperCase()})
-                </button>
-              </div>
-            </section>
-          )}
-
           {activeTab === "Settings" && (
             <section className="main-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
               <div className="panel settings-panel">
@@ -736,23 +700,6 @@ export function App() {
                 </div>
               </div>
 
-              <div className="panel settings-panel">
-                <PanelTitle title="API Integrations" />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1rem' }}>
-                  <Field label="Apollo API Key">
-                    <input type="password" value="**************" disabled style={{ opacity: 0.7 }} />
-                    <small style={{ display: 'block', marginTop: '6px', color: '#64748B' }}>Configured securely in backend environment variables.</small>
-                  </Field>
-                  <Field label="ZeroBounce API Key">
-                    <input type="password" value="**************" disabled style={{ opacity: 0.7 }} />
-                    <small style={{ display: 'block', marginTop: '6px', color: '#64748B' }}>Configured securely in backend environment variables.</small>
-                  </Field>
-                  <Field label="LinkedIn Credentials">
-                    <input type="password" value="**************" disabled style={{ opacity: 0.7 }} />
-                    <small style={{ display: 'block', marginTop: '6px', color: '#64748B' }}>Configured securely in backend environment variables.</small>
-                  </Field>
-                </div>
-              </div>
             </section>
           )}
 
