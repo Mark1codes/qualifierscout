@@ -48,6 +48,7 @@ docs/
 tmp/
 *.md
 !README.md
+!docs/SYSTEM_ARCHITECTURE.md
 
 # Scratch, Tests, Exports, Images & Temp files
 backend/scratch/
