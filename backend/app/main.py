@@ -6,7 +6,8 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from dotenv import load_dotenv
+from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -15,9 +16,8 @@ from app.schemas import ExportRequest, LeadUpdateRequest, ScrapeStartRequest, Sc
 from app.scrapers.north_carolina import NorthCarolinaScraper
 from app.services.cleaner import clean_record
 from app.services.email_enrichment import enrich_with_email
-from dotenv import load_dotenv
-import os
-
+BASE_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(BASE_DIR / ".env")
 load_dotenv()
 from app.services.linkedin_enrichment import enrich_with_linkedin
 
@@ -45,6 +45,18 @@ try:
     from app.scrapers.nevada import NevadaScraper
 except ImportError:
     NevadaScraper = None
+try:
+    from app.scrapers.alaska import AlaskaScraper
+except ImportError:
+    AlaskaScraper = None
+try:
+    from app.scrapers.utah import UtahScraper
+except ImportError:
+    UtahScraper = None
+try:
+    from app.scrapers.colorado import ColoradoScraper
+except ImportError:
+    ColoradoScraper = None
 
 SCRAPER_REGISTRY = {
     "North Carolina": NorthCarolinaScraper,
@@ -54,6 +66,9 @@ SCRAPER_REGISTRY = {
     "Texas": TexasScraper,
     "New Mexico": NewMexicoScraper,
     "Nevada": NevadaScraper,
+    "Alaska": AlaskaScraper,
+    "Utah": UtahScraper,
+    "Colorado": ColoradoScraper,
 }
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -144,6 +159,9 @@ STATE_MAP = {
     "North Carolina": ["North Carolina", "NC"],
     "New Mexico": ["New Mexico", "NM"],
     "Nevada": ["Nevada", "NV"],
+    "Alaska": ["Alaska", "AK"],
+    "Utah": ["Utah", "UT"],
+    "Colorado": ["Colorado", "CO"],
     "FL": ["Florida", "FL"],
     "CA": ["California", "CA"],
     "GA": ["Georgia", "GA"],
@@ -151,6 +169,9 @@ STATE_MAP = {
     "NC": ["North Carolina", "NC"],
     "NM": ["New Mexico", "NM"],
     "NV": ["Nevada", "NV"],
+    "AK": ["Alaska", "AK"],
+    "UT": ["Utah", "UT"],
+    "CO": ["Colorado", "CO"],
 }
 
 
@@ -217,6 +238,57 @@ def update_lead(lead_id: int, request: LeadUpdateRequest) -> dict:
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
     return dict(lead)
+
+
+@app.post("/leads/import-csv")
+async def import_csv_leads(file: UploadFile = File(...)) -> dict:
+    if not file.filename or not (file.filename.endswith(".csv") or file.filename.endswith(".xlsx")):
+        raise HTTPException(status_code=400, detail="Only .csv and .xlsx files are supported.")
+    
+    contents = await file.read()
+    import io
+    if file.filename.endswith(".csv"):
+        df = pd.read_csv(io.BytesIO(contents))
+    else:
+        df = pd.read_excel(io.BytesIO(contents))
+        
+    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    
+    records = []
+    for _, row in df.iterrows():
+        rec = {
+            "contractor_name": str(row.get("contractor_name") or row.get("name") or row.get("licensee_name") or "").strip(),
+            "company_name": str(row.get("company_name") or row.get("business_name") or "").strip(),
+            "license_number": str(row.get("license_number") or row.get("license_num") or row.get("license_#") or "").strip(),
+            "license_type": str(row.get("license_type") or row.get("profession") or "General Contractor").strip(),
+            "license_status": str(row.get("license_status") or row.get("status") or "Active").strip(),
+            "expiration_date": str(row.get("expiration_date") or "").strip(),
+            "address": str(row.get("address") or "").strip(),
+            "city": str(row.get("city") or "Salt Lake City").strip(),
+            "state": str(row.get("state") or "UT").strip(),
+            "zip_code": str(row.get("zip_code") or row.get("zip") or "").strip(),
+            "phone": str(row.get("phone") or "").strip(),
+            "email": str(row.get("email") or "").strip(),
+            "website": str(row.get("website") or "").strip(),
+            "source_url": "Utah DOPL GRAMA / Bulk Import"
+        }
+        if rec["contractor_name"] or rec["company_name"] or rec["license_number"]:
+            records.append(clean_record(rec))
+            
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO scrape_runs
+            (state, license_type, city, status, progress, total_leads)
+            VALUES (?, ?, ?, 'completed', 100, ?)
+            """,
+            ("Utah", "Bulk CSV Import", "Statewide", len(records)),
+        )
+        run_id = int(cursor.lastrowid)
+        insert_leads(run_id, records)
+        update_duplicate_counts()
+        
+    return {"status": "success", "imported_count": len(records), "run_id": run_id}
 
 
 @app.post("/export")
@@ -305,7 +377,7 @@ def export_leads(request: ExportRequest) -> FileResponse:
             
     df.insert(4, "First Name", [str(n).title() for n in first_names])
     df.insert(5, "Last Name", [str(n).title() for n in last_names])
-    df.drop(columns=["contractor_name", "state"], inplace=True)
+    df.drop(columns=[c for c in ["contractor_name", "state", "city"] if c in df.columns], inplace=True)
     
     if request.individuals_only:
         df = df[df["First Name"].str.strip() != ""]
@@ -323,8 +395,6 @@ def export_leads(request: ExportRequest) -> FileResponse:
         "email": "Email",
         "phone": "Number",
         "linkedin": "LinkedIn Profile",
-        "city": "City",
-        "state": "State",
     }
     df.rename(columns=header_mapping, inplace=True)
 
@@ -376,11 +446,9 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
         set_run_status(run_id, "running", 50)
         
         if request.enrich_leads:
-            # New Mexico Two-Stage "Ghost Hunter" Pipeline
-            if request.state == "New Mexico":
-                from app.services.linkedin_enrichment import enrich_with_linkedin
-                log("Running pre-enrichment LinkedIn web search for NM ghosts...")
-                records = await enrich_with_linkedin(records, log)
+            from app.services.linkedin_enrichment import enrich_with_linkedin
+            log("Running Ghost Hunter decision-maker discovery & LinkedIn search...")
+            records = await enrich_with_linkedin(records, log)
 
             from app.services.apollo_enrichment import enrich_with_apollo
             log("Running Premium Apollo API enrichment...")

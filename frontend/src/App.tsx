@@ -7,6 +7,7 @@ import {
   Database,
   Download,
   FileSpreadsheet,
+  Upload,
   LayoutDashboard,
   ListFilter,
   Loader2,
@@ -45,10 +46,13 @@ const CITIES_BY_STATE: Record<string, string[]> = {
   "Texas": ["Houston", "Austin", "Dallas", "San Antonio", "Fort Worth", "El Paso", "Arlington", "Corpus Christi", "Plano", "Laredo", "Lubbock", "Garland", "Irving", "Amarillo", "Grand Prairie", "Brownsville", "McKinney", "Frisco", "Pasadena", "Mesquite", "Killeen", "McAllen", "Carrollton", "Midland", "Waco", "Denton", "Abilene", "Odessa", "Beaumont", "Round Rock", "The Woodlands", "Richardson", "Pearland", "College Station", "Wichita Falls", "Lewisville", "Tyler", "San Angelo", "League City", "Allen", "Sugar Land", "Edinburg", "Mission", "Longview", "Bryan", "Baytown", "Pharr", "Temple", "Missouri City", "Flower Mound"],
   "New Mexico": ["Albuquerque", "Las Cruces", "Rio Rancho", "Santa Fe", "Roswell", "Farmington", "Clovis", "Hobbs", "Alamogordo", "Carlsbad", "Gallup", "Los Lunas", "Sunland Park", "Deming", "Artesia", "Las Vegas", "Portales", "Silver City", "Taos", "Grants", "Ruidoso", "Socorro", "Espanola", "Lovington", "Belen", "Bernalillo", "Corrales", "Bloomfield", "Aztec", "Truth or Consequences", "Los Alamos", "Raton", "Edgewood", "Milan", "Anthony", "Santa Rosa", "Eunice", "Tucumcari", "Tularosa", "Jal", "Mesilla", "Dexter", "Bayard", "Chaparral", "Santa Teresa", "Vado", "Zuni Pueblo", "Kirtland", "Moriarty", "Estancia", "Peralta", "Bosque Farms", "Hatch", "Lordsburg", "Magdalena", "Angel Fire", "Eagle Nest", "Red River", "Pecos", "Jemez Springs", "Mescalero", "Vaughn", "Carrizozo", "Tijeras"],
   "Nevada": ["Las Vegas", "Reno", "Henderson", "North Las Vegas", "Sparks", "Carson City", "Elko", "Boulder City", "Mesquite", "Fallon", "Fernley", "Pahrump", "Incline Village"],
+  "Alaska": ["Anchorage", "Fairbanks", "Juneau", "Wasilla", "Ketchikan", "Sitka", "Kenai", "Palmer", "Soldotna", "Kodiak", "Barrow"],
+  "Utah": ["Salt Lake City", "West Valley City", "Provo", "West Jordan", "Orem", "Sandy", "Ogden", "St. George", "Layton", "South Jordan", "Lehi", "Millcreek", "Taylorsville", "Logan", "Murray", "Draper", "Bountiful", "Riverton", "Spanish Fork", "Roy", "Pleasant Grove", "Kearns", "Tooele", "Cottonwood Heights", "Midvale", "Springville", "Eagle Mountain", "Cedar City", "American Fork", "Kaysville"],
+  "Colorado": ["Denver", "Colorado Springs", "Aurora", "Fort Collins", "Lakewood", "Thornton", "Arvada", "Westminster", "Pueblo", "Greeley", "Centennial", "Boulder", "Highlands Ranch", "Longmont", "Loveland", "Broomfield", "Castle Rock", "Commerce City", "Parker", "Littleton"],
 };
 
 const ALL_LICENSE_TYPES = [
-  "General Contractor", "Railroad and Underground", "Residential Contractor",
+  "Underground Contractor", "General Contractor", "Railroad and Underground", "Residential Contractor",
   "Building Contractor", "Electrical Contractor", "Plumbing Contractor",
   "HVAC Contractor", "Roofing Contractor", "Mechanical Contractor",
   "Pool Contractor", "Masonry Contractor", "Concrete Contractor",
@@ -65,6 +69,33 @@ const ALL_LICENSE_TYPES = [
 
 
 const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
+  Colorado: [
+    "Electrical Contractor",
+    "Plumbing Contractor",
+    "General Contractor",
+    "Building Contractor",
+    "Residential Contractor",
+  ],
+  Utah: [
+    "General Contractor",
+    "Underground Contractor",
+    "Building Contractor",
+    "Residential Contractor",
+    "Electrical Contractor",
+    "HVAC Contractor",
+    "Plumbing Contractor",
+    "Roofing Contractor",
+  ],
+  Alaska: [
+    "Underground Contractor",
+    "General Contractor",
+    "Building Contractor",
+    "Residential Contractor",
+    "Roofing Contractor",
+    "Electrical Contractor",
+    "HVAC Contractor",
+    "Plumbing Contractor",
+  ],
   Nevada: [
     "General Contractor",
     "Building Contractor",
@@ -202,6 +233,33 @@ export function App() {
     }
   }
 
+  async function handleImportCSV(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    setMessage(`Importing bulk leads from ${file.name}...`);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("http://localhost:8000/leads/import-csv", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        throw new Error("Failed to import CSV file");
+      }
+      const data = await res.json();
+      setMessage(`Successfully imported ${data.imported_count} leads from ${file.name}!`);
+      await refreshLeads();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Error importing CSV");
+    } finally {
+      setLoading(false);
+      event.target.value = "";
+    }
+  }
+
   async function handleStatusChange(id: number, nextStatus: VerificationStatus) {
     const updated = await updateLead(id, nextStatus);
     setLeads((current) => current.map((lead) => (lead.id === id ? updated : lead)));
@@ -247,8 +305,8 @@ export function App() {
           <div className="brand-mark">
             <svg height="29" width="23" viewBox="0 0 31 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <g transform="translate(0, 0) rotate(0 15 20)" id="logogram" style={{ opacity: 1 }}>
-              <path fill="currentColor" d="M15 0L20.4545 5.33333L0 25.3333V14.6667L15 0Z"/>
-              <path fill="currentColor" opacity=".72" d="M2.90827 28.177L15 40L30 25.3334V14.6667L20.4545 5.33337L0 25.3334L0.0041688 25.3375L20.4545 5.33337V20.6667L11.25 29.6667V20.1324L2.90827 28.177Z"/>
+              <path fill="#06D1D4" d="M15 0L20.4545 5.33333L0 25.3333V14.6667L15 0Z"/>
+              <path fill="#260AF5" d="M2.90827 28.177L15 40L30 25.3334V14.6667L20.4545 5.33337L0 25.3334L0.0041688 25.3375L20.4545 5.33337V20.6667L11.25 29.6667V20.1324L2.90827 28.177Z"/>
             </g>
           </svg>
           </div>
@@ -466,13 +524,11 @@ export function App() {
                         setLicenseType(types[0]);
                       }}
                     >
-                      <option>Florida</option>
-                      <option>California</option>
-                      <option>North Carolina</option>
-                      <option>Georgia</option>
-                      <option>Texas</option>
-                      <option>New Mexico</option>
-                      <option>Nevada</option>
+                      {Object.keys(CITIES_BY_STATE)
+                        .filter((st) => !["Georgia", "Utah", "Colorado"].includes(st))
+                        .map((st) => (
+                          <option key={st}>{st}</option>
+                        ))}
                     </select>
                   </Field>
                   <Field label="Trade / License Type">
@@ -524,6 +580,13 @@ export function App() {
                     {loading ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
                     Start Scrape
                   </button>
+                  <div style={{ marginTop: '12px' }}>
+                    <label className="secondary-button" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer', padding: '10px', borderRadius: '6px', border: '1px solid var(--slate-700)', background: 'var(--slate-800)', color: 'var(--slate-200)', fontSize: '0.9rem' }}>
+                      <Upload size={16} />
+                      Import State CSV/Excel (Free)
+                      <input type="file" accept=".csv,.xlsx" onChange={handleImportCSV} style={{ display: 'none' }} />
+                    </label>
+                  </div>
                 </section>
 
                 <section className="panel log-panel">

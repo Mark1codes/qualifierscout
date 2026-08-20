@@ -43,15 +43,11 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Markdown docs
+# Documentation & Temp Folders
+docs/
+tmp/
 *.md
 !README.md
-!PIPELINE_ARCHITECTURE.md
-
-# SQLite DB
-*.db
-*.sqlite
-*.sqlite3
 
 # Scratch, Tests, Exports, Images & Temp files
 backend/scratch/
@@ -62,3 +58,8 @@ backend/exports/
 *.jpg
 *.docx
 output.txt
+
+# Databases
+*.sqlite3
+*.sqlite
+*.db

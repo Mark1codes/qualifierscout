@@ -4,8 +4,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
-
-from playwright.async_api import async_playwright
+import httpx
 from bs4 import BeautifulSoup
 
 from app.schemas import ScrapeStartRequest
@@ -20,6 +19,7 @@ NV_LICENSE_TYPES = {
     "HVAC Contractor": "100857",           # C21 Refrigeration and Air Conditioning
     "Plumbing Contractor": "101527",       # C01 Plumbing and Heating
     "Roofing Contractor": "100850",        # C15 Roofing and Siding
+    "Underground Contractor": "100212",    # A General Engineering / Underground
     "default": "100844"
 }
 
@@ -84,8 +84,6 @@ def format_person_name(raw: str) -> str:
 def parse_nevada_name(name_raw: str) -> tuple[str, str]:
     """
     Parses a Nevada NSCB name string into (contractor_name, company_name).
-    - 'JOHNSON, ROBERT CRAIG' -> contractor_name='Robert Craig Johnson', company_name='JOHNSON, ROBERT CRAIG'
-    - 'AGILE CONSTRUCTION SERVICES LLC' -> contractor_name='', company_name='AGILE CONSTRUCTION SERVICES LLC'
     """
     name_clean = name_raw.strip()
     if not name_clean:
@@ -119,10 +117,10 @@ class NevadaScraper:
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
     async def scrape(self, request: ScrapeStartRequest, run_id: int, log) -> list[dict]:
-        log("Opening Nevada NSCB license search with Playwright...")
+        log("Querying Nevada NSCB portal directly (100% Free, Instant execution)...")
         records = await self._try_public_search(request, log)
         if not records:
-            log("Nevada NSCB returned no records or search timed out.", "warning")
+            log("Nevada NSCB returned no records or search returned empty.", "warning")
 
         records = records[: request.max_records]
         raw_path = self.raw_dir / f"run_{run_id}_nevada_raw.json"
@@ -135,34 +133,45 @@ class NevadaScraper:
         city_param = (request.city or "").upper().strip()
         county_code = NV_COUNTIES.get(city_param, NV_COUNTIES["default"])
 
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": SEARCH_URL
+        }
+
         records = []
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(**self._browser_launch_options())
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    viewport={"width": 1920, "height": 1080}
-                )
-                page = await context.new_page()
-                await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
+                log(f"Querying Nevada NSCB search page for Classification={lic_type_code}, County={county_code}...")
+                r1 = await client.get(SEARCH_URL, headers=headers)
+                if r1.status_code != 200:
+                    log(f"Nevada GET status code {r1.status_code}", "warning")
+                    return []
 
-                log(f"Navigating to Nevada NSCB search page for Classification={lic_type_code}...")
-                await page.goto(SEARCH_URL, timeout=30000)
+                soup1 = BeautifulSoup(r1.text, "html.parser")
+                viewstate = soup1.find("input", id="__VIEWSTATE")
+                viewstate_gen = soup1.find("input", id="__VIEWSTATEGENERATOR")
+                event_val = soup1.find("input", id="__EVENTVALIDATION")
 
-                # Select County and Classification
-                log(f"Filling search form: County Code={county_code}, Classification={lic_type_code}...")
-                await page.select_option("#ContentPlaceHolder1_County", value=county_code)
-                await page.select_option("#ContentPlaceHolder1_App", value=lic_type_code)
+                vs = viewstate.get("value") if viewstate else ""
+                vsg = viewstate_gen.get("value") if viewstate_gen else ""
+                ev = event_val.get("value") if event_val else ""
 
-                log("Submitting search request...")
-                await page.click("#ContentPlaceHolder1_btnSearch")
+                form_data = {
+                    "__VIEWSTATE": vs,
+                    "__VIEWSTATEGENERATOR": vsg,
+                    "__EVENTVALIDATION": ev,
+                    "ctl00$ContentPlaceHolder1$County": county_code,
+                    "ctl00$ContentPlaceHolder1$App": lic_type_code,
+                    "ctl00$ContentPlaceHolder1$btnSearch": "Search"
+                }
 
-                await page.wait_for_load_state("networkidle")
-                await page.wait_for_timeout(3000)
+                log("Submitting Nevada search form request...")
+                r2 = await client.post(SEARCH_URL, data=form_data, headers=headers)
+                if r2.status_code != 200:
+                    log(f"Nevada POST search returned status code {r2.status_code}", "error")
+                    return []
 
-                content = await page.content()
-                soup = BeautifulSoup(content, "html.parser")
-
+                soup = BeautifulSoup(r2.text, "html.parser")
                 tables = soup.find_all("table")
                 for table in tables:
                     rows = table.find_all("tr")
@@ -236,92 +245,9 @@ class NevadaScraper:
                             "phone": phone
                         })
 
-                # Up to max_records, fetch Principal/Qualifier details if contractor_name is empty
-                needed_records = records[: request.max_records]
-                corporate_count = sum(1 for r in needed_records if not r["contractor_name"])
-                if corporate_count > 0:
-                    log(f"Fetching Officers & Qualifiers from NSCB detail pages for {corporate_count} corporate records...")
-                    
-                    for idx, r in enumerate(needed_records):
-                        if r["contractor_name"]:
-                            continue
-                        try:
-                            lic_num = r["license_number"]
-                            link = page.locator(f"a:has-text('{lic_num}')")
-                            if await link.count() == 0:
-                                link = page.locator("a[id*='lnkLicense']").nth(idx)
-                                
-                            if await link.count() > 0:
-                                await link.first.click()
-                                try:
-                                    await page.wait_for_selector("text=License Details", timeout=6000)
-                                except Exception:
-                                    await page.wait_for_timeout(2000)
-                                
-                                detail_soup = BeautifulSoup(await page.content(), "html.parser")
-                                lines = [l.strip() for l in detail_soup.get_text("\n", strip=True).split("\n") if l.strip()]
-                                
-                                qualifier_name = ""
-                                principal_name = ""
-                                in_principal = False
-                                in_qualifier = False
-                                
-                                for line in lines:
-                                    if line == "Principal Name":
-                                        in_principal, in_qualifier = True, False
-                                        continue
-                                    elif line in ("Qualified Individual(s)", "Qualified Individual"):
-                                        in_principal, in_qualifier = False, True
-                                        continue
-                                    elif line in ("Bond", "Bond Type:", "Classification(s):", "Status:"):
-                                        in_principal, in_qualifier = False, False
-                                        
-                                    if in_principal and line not in ("Relation Description", "Principal Name", "Manager", "Member", "President", "Secretary", "Treasurer", "Director", "Officer", "Owner"):
-                                        if ("," in line or re.match(r"^[A-Z\s\.\-]{3,}$", line)) and not principal_name:
-                                            principal_name = line
-                                            
-                                    if in_qualifier and line not in ("Qualifier Type", "Qualified Individual(s)", "Qualified Individual", "CMS and Trade", "Trade", "CMS"):
-                                        if ("," in line or re.match(r"^[A-Z\s\.\-]{3,}$", line)) and not qualifier_name:
-                                            qualifier_name = line
-                                            
-                                person_raw = qualifier_name or principal_name
-                                if person_raw:
-                                    r["contractor_name"] = format_person_name(person_raw)
-                                    log(f"  [{lic_num}] Found Officer/Qualifier: '{r['contractor_name']}'")
-                                    
-                                back_btn = page.locator("#ContentPlaceHolder1_btnBack, input[value*='Back']")
-                                if await back_btn.count() > 0:
-                                    await back_btn.first.click()
-                                    try:
-                                        await page.wait_for_selector("#ContentPlaceHolder1_dtgResults", timeout=6000)
-                                    except Exception:
-                                        await page.wait_for_timeout(2000)
-                                else:
-                                    await page.goto(SEARCH_URL)
-                                    await page.select_option("#ContentPlaceHolder1_County", value=county_code)
-                                    await page.select_option("#ContentPlaceHolder1_App", value=lic_type_code)
-                                    await page.click("#ContentPlaceHolder1_btnSearch")
-                                    await page.wait_for_selector("#ContentPlaceHolder1_dtgResults")
-                        except Exception as e:
-                            log(f"  Detail fetch skipped for license {r.get('license_number')}: {e}", "warning")
-                            try:
-                                await page.goto(SEARCH_URL)
-                                await page.select_option("#ContentPlaceHolder1_County", value=county_code)
-                                await page.select_option("#ContentPlaceHolder1_App", value=lic_type_code)
-                                await page.click("#ContentPlaceHolder1_btnSearch")
-                                await page.wait_for_selector("#ContentPlaceHolder1_dtgResults")
-                            except Exception:
-                                pass
-
-                log(f"Extracted {len(records)} Nevada records.")
-                await browser.close()
+                log(f"Extracted {len(records)} Nevada records from NSCB.")
                 return records
 
         except Exception as exc:
             log(f"Nevada NSCB scrape failed ({type(exc).__name__}): {exc}", "error")
             return []
-
-    @staticmethod
-    def _browser_launch_options() -> dict[str, Any]:
-        options: dict[str, Any] = {"headless": True}
-        return options

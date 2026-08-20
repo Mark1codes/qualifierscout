@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -12,7 +13,6 @@ from app.schemas import ScrapeStartRequest
 
 
 # Florida DBPR License types for Construction Industry (Board 06)
-# Only contractor-relevant types
 FL_LICENSE_TYPES = {
     "General Contractor": "0605",        # Certified General Contractor
     "Building Contractor": "0602",        # Certified Building Contractor
@@ -56,17 +56,32 @@ def parse_florida_name(name_raw: str) -> tuple[str, str]:
         first_part = parts[1] if len(parts) > 1 else ""
 
         if is_corporate:
-            # Company with comma, e.g. "Ace Construction & Remodeling, Llc"
             return "", name_clean
         else:
-            # Individual in LAST, FIRST format, e.g. "Acosta, Daniel David"
-            contractor_name = f"{first_part} {last_part}".strip()
+            contractor_name = f"{first_part} {last_part}".strip().title()
             return contractor_name, name_clean
 
     if is_corporate:
         return "", name_clean
     else:
-        return name_clean, name_clean
+        return name_clean.title(), name_clean
+
+
+def format_person_name(name_raw: str) -> str:
+    """
+    Formats DBPR detail page personnel name strings:
+    - 'MONTERO, RICARDO (Primary Name)' -> 'Ricardo Montero'
+    - 'SCHWAB, JOHN RICHARD' -> 'John Richard Schwab'
+    """
+    if not name_raw:
+        return ""
+    clean = name_raw.replace("(Primary Name)", "").strip()
+    if "," in clean:
+        parts = [p.strip() for p in clean.split(",", 1)]
+        last = parts[0].title()
+        first = parts[1].title() if len(parts) > 1 else ""
+        return f"{first} {last}".strip()
+    return clean.title()
 
 
 class FloridaScraper:
@@ -92,17 +107,144 @@ class FloridaScraper:
         return records
 
     async def _try_public_search(self, request: ScrapeStartRequest, log) -> list[dict]:
+        """Direct HTTP search against Florida DBPR with parallel personnel enrichment."""
         try:
-            import os
-            import random
-            zenrows_api_key = os.getenv("ZENROWS_API_KEY", "82dafe2655912ea0fd4b57ce1dd6e437838cdb2f")
-            zr_url = "https://api.zenrows.com/v1/"
-            
             lic_type_code = FL_LICENSE_TYPES.get(request.license_type, FL_LICENSE_TYPES["default"])
             city = (request.city or "MIAMI").upper()
 
-            # Retry a few times with different session_ids if it fails
-            for attempt in range(5):
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Referer": f"{SEARCH_URL}?mode=0&search=City",
+                "Origin": BASE_URL,
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                log(f"Querying Florida DBPR directly for {request.license_type} in {city}...")
+                
+                # Step 1: Initializing session on mode=1
+                mode1_url = f"{SEARCH_URL}?mode=1&search=City&SID=&brd=&typ="
+                r1 = await client.get(mode1_url, headers=headers)
+                if r1.status_code != 200:
+                    log(f"Florida DBPR mode=1 returned status {r1.status_code}", "warning")
+                    return await self._try_zenrows_search(request, log)
+
+                soup1 = BeautifulSoup(r1.text, "html.parser")
+                form1 = soup1.find("form")
+                if not form1:
+                    log("Florida DBPR mode=1 search form not found", "warning")
+                    return await self._try_zenrows_search(request, log)
+
+                data = {tag.get('name'): tag.get('value', '') for tag in form1.find_all('input', type='hidden') if tag.get('name')}
+                data.update({
+                    "Board": "06",
+                    "LicenseType": lic_type_code,
+                    "hBoard": "06",
+                    "hLicTyp": lic_type_code,
+                    "City": city,
+                    "County": "",
+                    "State": "FL",
+                    "RecsPerPage": "50",
+                    "SearchGo": "Search"
+                })
+
+                # Step 2: Submitting search to mode=2
+                mode2_url = f"{SEARCH_URL}?mode=2&search=City&SID=&brd=06&typ={lic_type_code}"
+                r2 = await client.post(mode2_url, headers=headers, data=data)
+                if r2.status_code != 200:
+                    log(f"Florida DBPR mode=2 returned status {r2.status_code}", "warning")
+                    return await self._try_zenrows_search(request, log)
+
+                soup2 = BeautifulSoup(r2.text, "html.parser")
+                raw_items = self._parse_results(soup2, city, log)
+                if not raw_items:
+                    log("Florida DBPR direct search returned 0 records, attempting ZenRows fallback...", "warning")
+                    return await self._try_zenrows_search(request, log)
+
+                log(f"Extracted {len(raw_items)} initial Florida search records. Resolving individual contractor personnel names...")
+
+                # Parallel resolution of individual qualifier / contractor personnel names
+                async def resolve_personnel(item):
+                    contractor_name = item["contractor_name"]
+                    company_name = item["company_name"]
+                    detail_href = item.get("detail_href")
+
+                    if not contractor_name and detail_href:
+                        person_name, dba_name = await self._fetch_personnel_name(client, detail_href, headers)
+                        if person_name:
+                            contractor_name = person_name
+                        if dba_name and not company_name:
+                            company_name = dba_name
+
+                    return {
+                        "source_url": BASE_URL,
+                        "license_type": item["license_type"],
+                        "contractor_name": contractor_name,
+                        "company_name": company_name or item["raw_name"],
+                        "license_number": item["license_number"],
+                        "license_status": item["license_status"],
+                        "expiration_date": item["expiration_date"],
+                        "address": item["address"],
+                        "city": item["city"],
+                        "state": "FL",
+                        "zip_code": item["zip_code"],
+                    }
+
+                records = await asyncio.gather(*[resolve_personnel(item) for item in raw_items[: request.max_records]])
+                log(f"Successfully retrieved {len(records)} Florida DBPR records with individual contractor names.")
+                return records
+
+        except Exception as exc:
+            log(f"Florida DBPR direct search failed: {exc}, switching to ZenRows fallback...", "warning")
+            return await self._try_zenrows_search(request, log)
+
+    async def _fetch_personnel_name(self, client: httpx.AsyncClient, detail_href: str, headers: dict) -> tuple[str, str]:
+        """Fetches individual qualifier / contractor personnel name from Florida DBPR license detail page."""
+        if not detail_href:
+            return "", ""
+        try:
+            url = detail_href if detail_href.startswith("http") else f"{BASE_URL}/{detail_href.lstrip('/')}"
+            r = await client.get(url, headers=headers, timeout=10.0)
+            if r.status_code != 200:
+                return "", ""
+
+            soup = BeautifulSoup(r.text, "html.parser")
+            primary_name = ""
+            dba_name = ""
+            for row in soup.find_all("div", class_="form-group"):
+                label = row.find("label")
+                val_div = row.find("div", class_="col-sm-8")
+                if label and val_div:
+                    lbl_text = label.get_text(strip=True).lower()
+                    val_text = val_div.get_text(strip=True)
+                    if lbl_text == "name":
+                        primary_name = format_person_name(val_text)
+                    elif "dba" in lbl_text:
+                        dba_name = val_text.strip()
+
+            return primary_name, dba_name
+        except Exception:
+            return "", ""
+
+    async def _try_zenrows_search(self, request: ScrapeStartRequest, log) -> list[dict]:
+        """Preserved ZenRows fallback strategy for future subscription use."""
+        try:
+            import os
+            import random
+            zenrows_api_key = os.getenv("ZENROWS_API_KEY", "").strip()
+            if not zenrows_api_key:
+                log("ZenRows API key not configured.", "info")
+                return []
+
+            zr_url = "https://api.zenrows.com/v1/"
+            lic_type_code = FL_LICENSE_TYPES.get(request.license_type, FL_LICENSE_TYPES["default"])
+            city = (request.city or "MIAMI").upper()
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            }
+
+            for attempt in range(3):
                 session_id = str(random.randint(10000, 99999))
                 session_params = {
                     "apikey": zenrows_api_key,
@@ -113,86 +255,85 @@ class FloridaScraper:
                 }
 
                 async with httpx.AsyncClient(timeout=90) as client:
-                    log(f"Attempt {attempt+1}: Initializing ZenRows session on mode=1...")
                     p1 = dict(session_params)
                     p1["url"] = f"{SEARCH_URL}?mode=1&search=City&SID=&brd=&typ="
-                    
-                    try:
-                        r1 = await client.get(zr_url, params=p1)
-                        if r1.status_code != 200:
-                            log(f"mode=1 returned {r1.status_code}, retrying...", "warning")
-                            continue
-                            
-                        soup1 = BeautifulSoup(r1.text, 'html.parser')
-                        form1 = soup1.find("form")
-                        if not form1:
-                            log("mode=1 form not found, retrying...", "warning")
-                            continue
-                            
-                        data = {tag.get('name'): tag.get('value', '') for tag in form1.find_all('input', type='hidden') if tag.get('name')}
-                        
-                        if 'hSearchType' not in data:
-                            log("mode=1 returned the home page instead of search form, retrying...", "warning")
-                            continue
-                            
-                        data.update({
-                            "Board": "06",
-                            "LicenseType": lic_type_code,
-                            "hBoard": "06",
-                            "hLicTyp": lic_type_code,
-                            "City": city,
-                            "County": "",
-                            "State": "FL",
-                            "RecsPerPage": "50",
-                            "SearchGo": "Search"
-                        })
-                        
-                        log(f"Submitting search to mode=2 for {request.license_type} in {city}...")
-                        p2 = dict(session_params)
-                        p2["url"] = f"{SEARCH_URL}?mode=2&search=City&SID=&brd=06&typ={lic_type_code}"
-                        
-                        r2 = await client.post(zr_url, params=p2, data=data)
-                        if r2.status_code != 200:
-                            log(f"mode=2 returned {r2.status_code}, retrying...", "warning")
-                            continue
-                            
-                        soup2 = BeautifulSoup(r2.text, 'html.parser')
-                        records = self._parse_results(soup2, city, lic_type_code, log)
-                        
-                        if records:
-                            log(f"Successfully retrieved {len(records)} Florida records.")
-                            return records
-                            
-                    except Exception as e:
-                        log(f"Attempt {attempt+1} failed: {e}", "warning")
+                    r1 = await client.get(zr_url, params=p1)
+                    if r1.status_code != 200:
                         continue
-                        
-            log("Florida DBPR scrape exhausted all retries.", "error")
-            return []
 
+                    soup1 = BeautifulSoup(r1.text, 'html.parser')
+                    form1 = soup1.find("form")
+                    if not form1:
+                        continue
+
+                    data = {tag.get('name'): tag.get('value', '') for tag in form1.find_all('input', type='hidden') if tag.get('name')}
+                    data.update({
+                        "Board": "06",
+                        "LicenseType": lic_type_code,
+                        "hBoard": "06",
+                        "hLicTyp": lic_type_code,
+                        "City": city,
+                        "County": "",
+                        "State": "FL",
+                        "RecsPerPage": "50",
+                        "SearchGo": "Search"
+                    })
+
+                    p2 = dict(session_params)
+                    p2["url"] = f"{SEARCH_URL}?mode=2&search=City&SID=&brd=06&typ={lic_type_code}"
+                    r2 = await client.post(zr_url, params=p2, data=data)
+                    if r2.status_code == 200:
+                        soup2 = BeautifulSoup(r2.text, 'html.parser')
+                        raw_items = self._parse_results(soup2, city, log)
+                        if raw_items:
+                            records = []
+                            for item in raw_items[: request.max_records]:
+                                contractor_name = item["contractor_name"]
+                                company_name = item["company_name"]
+                                if not contractor_name and item.get("detail_href"):
+                                    person_name, dba_name = await self._fetch_personnel_name(client, item["detail_href"], headers)
+                                    if person_name:
+                                        contractor_name = person_name
+                                    if dba_name and not company_name:
+                                        company_name = dba_name
+
+                                records.append({
+                                    "source_url": BASE_URL,
+                                    "license_type": item["license_type"],
+                                    "contractor_name": contractor_name,
+                                    "company_name": company_name or item["raw_name"],
+                                    "license_number": item["license_number"],
+                                    "license_status": item["license_status"],
+                                    "expiration_date": item["expiration_date"],
+                                    "address": item["address"],
+                                    "city": item["city"],
+                                    "state": "FL",
+                                    "zip_code": item["zip_code"],
+                                })
+                            log(f"ZenRows retrieved {len(records)} Florida records.")
+                            return records
+
+            return []
         except Exception as exc:
-            log(f"Florida DBPR scrape failed: {type(exc).__name__} - {exc}", "error")
+            log(f"ZenRows fallback exception: {exc}", "warning")
             return []
 
-    def _parse_results(self, soup: BeautifulSoup, city: str, lic_type: str, log) -> list[dict]:
+    def _parse_results(self, soup: BeautifulSoup, city: str, log) -> list[dict]:
         """
-        Parse the DBPR results page. Each contractor takes multiple rows.
-        FL DBPR licenses are issued to BUSINESSES (not individuals).
-        The 'Primary' NameType row contains the official business/company name.
+        Parse the DBPR results page table rows, including detail links.
         """
-        records = []
+        raw_items = []
         seen_licenses = set()
         current = None
 
-        # Iterate through all rows globally to handle nested table structures correctly
         for row in soup.find_all("tr"):
-            cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"], recursive=False)]
+            cells = row.find_all(["td", "th"], recursive=False)
+            cell_texts = [c.get_text(strip=True) for c in cells]
             
             # Contractor Header Row: 5 cells
-            if len(cells) == 5 and cells[0] != "License Type":
-                lic_type_val, name, name_type, lic_num, status_expires = cells
+            if len(cell_texts) == 5 and cell_texts[0] != "License Type":
+                lic_type_val, name, name_type, lic_num, status_expires = cell_texts
                 
-                # Ensure we have a valid name
                 if not name:
                     continue
 
@@ -212,8 +353,13 @@ class FloridaScraper:
 
                 contractor_name, company_name = parse_florida_name(name)
 
+                detail_href = ""
+                a_tag = cells[1].find("a")
+                if a_tag and a_tag.get("href"):
+                    detail_href = a_tag.get("href")
+
                 current = {
-                    "source_url": BASE_URL,
+                    "raw_name": name,
                     "license_type": lic_type_val,
                     "contractor_name": contractor_name,
                     "company_name": company_name,
@@ -224,13 +370,14 @@ class FloridaScraper:
                     "city": city.title(),
                     "state": "FL",
                     "zip_code": "",
+                    "detail_href": detail_href
                 }
-                records.append(current)
+                raw_items.append(current)
                 
             # Address Row: 2 cells, starting with "Address" or "Location"
-            elif len(cells) == 2 and current:
-                label = cells[0].lower()
-                val = cells[1].strip()
+            elif len(cell_texts) == 2 and current:
+                label = cell_texts[0].lower()
+                val = cell_texts[1].strip()
                 if "address*:" in label:
                     address_str = val
                     address_base = address_str.split("  ")[0].strip()
@@ -241,4 +388,4 @@ class FloridaScraper:
                     if zip_match and not current["zip_code"]:
                         current["zip_code"] = zip_match.group(1)
 
-        return records
+        return raw_items
