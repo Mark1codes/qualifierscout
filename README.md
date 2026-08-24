@@ -3,7 +3,7 @@
 QualifierScout is a professional B2B lead generation and data triangulation platform specifically designed for scraping, verifying, and enriching contractor license data from various state portals.
 
 ## 🚀 Features
-- **Multi-State Scraping Engines:** Native support for scraping contractor license portals in Florida, California, North Carolina, Texas, New Mexico, Nevada, and Alaska, with dedicated bulk CSV/Excel data ingestion for Georgia, Utah, and Colorado.
+- **Multi-State Scraping Engines:** Native support for scraping contractor license portals in Florida, California, North Carolina, Texas, New Mexico, Nevada, and Alaska.
 - **Dynamic Trade Mapping:** State-specific mapping to pull exact equivalents (e.g., HVAC companies in Texas where General Contractor licenses don't exist).
 - **Ghost Hunter Enrichment:** Automatically enriches missing contact info and social media profiles using Apollo and LinkedIn integrations.
 - **Analytics Dashboard:** Beautiful, real-time charts tracking lead quality and geographic distribution using Recharts.
