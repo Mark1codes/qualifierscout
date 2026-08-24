@@ -580,6 +580,7 @@ export function App() {
                     {loading ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
                     Start Scrape
                   </button>
+                  {/* 
                   <div style={{ marginTop: '12px' }}>
                     <label className="secondary-button" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer', padding: '10px', borderRadius: '6px', border: '1px solid var(--slate-700)', background: 'var(--slate-800)', color: 'var(--slate-200)', fontSize: '0.9rem' }}>
                       <Upload size={16} />
@@ -587,6 +588,7 @@ export function App() {
                       <input type="file" accept=".csv,.xlsx" onChange={handleImportCSV} style={{ display: 'none' }} />
                     </label>
                   </div>
+                  */}
                 </section>
 
                 <section className="panel log-panel">
