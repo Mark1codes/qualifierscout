@@ -64,7 +64,6 @@ pip install -r requirements.txt
 Create a `.env` file in the `backend/` directory and add your API keys:
 ```env
 APOLLO_API_KEY=your_apollo_key_here
-ZENROWS_API_KEY=your_zenrows_key_here
 ```
 
 **Run the Backend Server:**
