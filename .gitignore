@@ -49,6 +49,7 @@ tmp/
 *.md
 !README.md
 !docs/SYSTEM_ARCHITECTURE.md
+!docs/GIT_UPDATE_GUIDE.md
 
 # Scratch, Tests, Exports, Images & Temp files
 backend/scratch/
