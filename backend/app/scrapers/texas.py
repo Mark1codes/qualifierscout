@@ -20,19 +20,20 @@ RESULTS_URL = BASE_URL + "SearchResultsListBrowse.asp"
 #   ELEVTR  = Elevator Contractors (company license)
 #   MOLD    = Mold Remediation Companies
 #   WWDRLL  = Water Well Drillers / Pump Installers
+# Texas Department of Licensing and Regulation (TDLR) Search Mapping
 TX_LICENSE_TYPE_MAP = {
-    # Supported TDLR contractor types
-    "HVAC Contractor":              "AIRREF",  # Air Conditioning Contractors (company)
-    "Electrical Contractor":        "ELCTRC",  # Electrical Contractors (company)
-    "Elevator Contractor":          "ELEVTR",  # Elevator Contractors (company)
-    "Mold Remediation Contractor":  "MOLD",    # Mold Remediation Companies
-    "Water Well Driller":           "WWDRLL",  # Water Well Drillers / Pump Installers
-    # Fallback for anything not natively supported in TX
-    "default":                      "AIRREF",
+    "HVAC Contractor": "AIRREF",
+    "Electrical Contractor": "ELCTRC",
+    "Elevator Contractor": "ELEVTR",
+    "Mold Remediation Contractor": "MOLD",
+    "Water Well Driller": "WWDRLL",
+    "default": "AIRREF",
 }
 
 
 class TexasScraper:
+    """Scraper implementation for Texas Department of Licensing and Regulation (TDLR)."""
+
     name = "Texas TDLR"
 
     def __init__(self, raw_dir: Path) -> None:
@@ -40,14 +41,14 @@ class TexasScraper:
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
     async def scrape(self, request: ScrapeStartRequest, run_id: int, log) -> list[dict]:
+        """Execute license search for Texas contractors."""
         log("Opening Texas TDLR license search...")
 
-        # Inform user if they selected General Contractor (not available in TX)
         if request.license_type in ("General Contractor", "Residential Contractor", "Building Contractor"):
             log(
                 f"NOTE: Texas has no statewide '{request.license_type}' license. "
                 f"Scraping HVAC Contractor company licenses (TACLA) as the closest regulated equivalent.",
-                "warning"
+                "warning",
             )
 
         records = await self._try_public_search(request, log)
@@ -66,27 +67,25 @@ class TexasScraper:
             city = (request.city or "Houston").upper().strip()
 
             async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
-                # Fetch the form page to get any hidden tokens
                 r = await client.get(SEARCH_URL)
                 soup = BeautifulSoup(r.content, "html.parser")
                 form = soup.find("form")
                 action = form.get("action", "") if form else ""
                 full_url = urljoin(BASE_URL, action) if action else RESULTS_URL
 
-                # City field in TDLR has fixed-width padding — pad to match
-                # The city select options are padded to ~20 chars
+                # TDLR city search field requires 20-character padding
                 city_padded = city.ljust(20)
 
                 payload = {
-                    "pht_lic":      "",
-                    "pht_expdt":    "",
+                    "pht_lic": "",
+                    "pht_expdt": "",
                     "pht_oth_name": "",
-                    "phy_zip":      "",
-                    "B1":           "Search",
-                    "B2":           "Reset",
-                    "tdlr_status":  tdlr_type,
-                    "phy_city":     city_padded,
-                    "phy_cnty":     "-1",
+                    "phy_zip": "",
+                    "B1": "Search",
+                    "B2": "Reset",
+                    "tdlr_status": tdlr_type,
+                    "phy_city": city_padded,
+                    "phy_cnty": "-1",
                 }
 
                 log(f"Searching Texas TDLR for {tdlr_type} contractors in {city}...")
@@ -95,7 +94,7 @@ class TexasScraper:
 
                 records = self._parse_results(soup2, city, request.license_type, log)
 
-                # If city-specific search returned nothing, try without city filter (statewide)
+                # Fallback to statewide query if city search yields zero records
                 if not records:
                     log(f"No results for {city}. Trying statewide search...", "warning")
                     payload["phy_city"] = ""
@@ -111,15 +110,7 @@ class TexasScraper:
             return []
 
     def _parse_results(self, soup: BeautifulSoup, city: str, license_type: str, log) -> list[dict]:
-        """
-        Parse TDLR results table. AIRREF contractor rows have the format:
-            License#          | Exp Date  | Name                              | City | Zip | County | Phone
-            TACLA00000103C    | 05/12/2027| ANDERSON, ORIN RAE (MLN COMPANY)  |      |     | HARRIS |
-
-        The company name is embedded in parentheses after the individual's name.
-        We extract both the individual (contractor_name) and the company (company_name)
-        from this single Name cell — NO detail page visit needed.
-        """
+        """Parse HTML result tables into structured contractor lead objects."""
         records = []
 
         for table in soup.find_all("table"):
@@ -147,14 +138,9 @@ class TexasScraper:
                 county = cells[5].strip() if len(cells) > 5 else ""
                 phone = cells[6].strip() if len(cells) > 6 else ""
 
-                if not lic_num or not name_raw:
+                if not lic_num or not name_raw or not re.match(r"[A-Z]+\d+", lic_num):
                     continue
 
-                # Skip non-license rows (loading messages, etc.)
-                if not re.match(r"[A-Z]+\d+", lic_num):
-                    continue
-
-                # Parse expiration and status
                 exp_date = ""
                 status = "Active"
                 exp_match = re.search(r"(\d{2}/\d{2}/\d{4})", exp_date_raw)
@@ -165,35 +151,22 @@ class TexasScraper:
                 elif "Ren process" in exp_date_raw:
                     status = "Renewal Pending"
 
-                # Parse name: "LAST, FIRST (COMPANY NAME)" or "LAST, FIRST"
                 contractor_name = ""
                 company_name = ""
 
                 paren_match = re.match(r"^(.*?)\s*\((.+)\)\s*$", name_raw)
                 if paren_match:
-                    # Has company name in parens
                     raw_person = paren_match.group(1).strip()
                     company_name = paren_match.group(2).strip()
 
-                    # Convert "LAST, FIRST" -> "FIRST LAST"
                     parts = [p.strip() for p in raw_person.split(",") if p.strip()]
-                    if len(parts) == 2:
-                        contractor_name = f"{parts[1]} {parts[0]}"
-                    else:
-                        contractor_name = raw_person
+                    contractor_name = f"{parts[1]} {parts[0]}" if len(parts) == 2 else raw_person
                 else:
-                    # No company — individual name only
                     parts = [p.strip() for p in name_raw.split(",") if p.strip()]
-                    if len(parts) == 2:
-                        contractor_name = f"{parts[1]} {parts[0]}"
-                    else:
-                        contractor_name = name_raw
+                    contractor_name = f"{parts[1]} {parts[0]}" if len(parts) == 2 else name_raw
 
-                # Clean up company name — skip obviously junk values
-                if company_name:
-                    junk = ["NONE", "N/A", "NA", "SAME AS ABOVE", "SELF"]
-                    if company_name.upper().strip() in junk:
-                        company_name = ""
+                if company_name and company_name.upper().strip() in {"NONE", "N/A", "NA", "SAME AS ABOVE", "SELF"}:
+                    company_name = ""
 
                 records.append({
                     "source_url":       BASE_URL,
