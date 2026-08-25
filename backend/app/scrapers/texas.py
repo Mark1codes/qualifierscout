@@ -196,49 +196,78 @@ class TexasScraper:
         }
 
         records = []
+        csv_text = ""
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15) as client:
                 r = await client.get(url, headers=headers)
-                if r.status_code != 200:
-                    log(f"TSBPE endpoint returned status code {r.status_code}", "error")
-                    return []
+                if r.status_code == 200:
+                    csv_text = r.text
+                else:
+                    log(f"TSBPE direct endpoint returned status code {r.status_code}. Bypassing with Playwright stealth...", "warning")
 
-                lines = r.text.splitlines()
-                reader = csv.DictReader(lines)
+            if not csv_text:
+                from playwright.async_api import async_playwright
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=True)
+                    context = await browser.new_context(user_agent=headers["User-Agent"])
+                    page = await context.new_page()
+                    try:
+                        async with page.expect_download(timeout=20000) as download_info:
+                            try:
+                                await page.goto(url, timeout=20000)
+                            except Exception as goto_err:
+                                if "Download is starting" not in str(goto_err):
+                                    raise goto_err
 
-                for row in reader:
-                    row_city = (row.get("CITY") or "").upper().strip()
+                        download = await download_info.value
+                        temp_path = self.raw_dir / f"tsbpe_temp_{request.city or 'all'}.csv"
+                        await download.save_as(temp_path)
+                        csv_text = temp_path.read_text(encoding="utf-8", errors="ignore")
+                        if temp_path.exists():
+                            temp_path.unlink()
+                    finally:
+                        await browser.close()
 
-                    # City filter if provided by user
-                    if city_filter and city_filter not in row_city:
-                        continue
+            if not csv_text:
+                log("Failed to retrieve TSBPE CSV data.", "error")
+                return []
 
-                    first = (row.get("FIRST_NAME") or "").strip().title()
-                    last = (row.get("LAST_NAME") or "").strip().title()
-                    full_name = f"{first} {last}".strip()
-                    company = (row.get("PLUMB_COMPANY") or "").strip().title() or full_name
+            lines = csv_text.splitlines()
+            reader = csv.DictReader(lines)
 
-                    raw_status = (row.get("LIC_STATUS") or "").strip()
-                    status = "Active" if raw_status == "Current" else (raw_status.capitalize() or "Active")
+            for row in reader:
+                row_city = (row.get("CITY") or "").upper().strip()
 
-                    records.append({
-                        "source_url": "https://tsbpe.texas.gov/download-csv/RMP/",
-                        "contractor_name": full_name,
-                        "company_name": company,
-                        "license_number": f"RMP-{row.get('LICENSE_NBR', '')}",
-                        "license_type": "Plumbing Contractor",
-                        "license_status": status,
-                        "expiration_date": row.get("EXPIRATION_DTE", ""),
-                        "address": f"{row.get('ADDR1', '')} {row.get('ADDR2', '')}".strip(),
-                        "city": row.get("CITY", "").title(),
-                        "state": "TX",
-                        "zip_code": row.get("ZIP", ""),
-                        "phone": row.get("PHONE", ""),
-                        "title": "Responsible Master Plumber / Owner",
-                    })
+                # City filter if provided by user
+                if city_filter and city_filter not in row_city:
+                    continue
 
-                log(f"Extracted {len(records)} Texas Plumbing Contractor records from TSBPE.")
-                return records
+                first = (row.get("FIRST_NAME") or "").strip().title()
+                last = (row.get("LAST_NAME") or "").strip().title()
+                full_name = f"{first} {last}".strip()
+                company = (row.get("PLUMB_COMPANY") or "").strip().title() or full_name
+
+                raw_status = (row.get("LIC_STATUS") or "").strip()
+                status = "Active" if raw_status == "Current" else (raw_status.capitalize() or "Active")
+
+                records.append({
+                    "source_url": "https://tsbpe.texas.gov/download-csv/RMP/",
+                    "contractor_name": full_name,
+                    "company_name": company,
+                    "license_number": f"RMP-{row.get('LICENSE_NBR', '')}",
+                    "license_type": "Plumbing Contractor",
+                    "license_status": status,
+                    "expiration_date": row.get("EXPIRATION_DTE", ""),
+                    "address": f"{row.get('ADDR1', '')} {row.get('ADDR2', '')}".strip(),
+                    "city": row.get("CITY", "").title(),
+                    "state": "TX",
+                    "zip_code": row.get("ZIP", ""),
+                    "phone": row.get("PHONE", ""),
+                    "title": "Responsible Master Plumber / Owner",
+                })
+
+            log(f"Extracted {len(records)} Texas Plumbing Contractor records from TSBPE.")
+            return records
 
         except Exception as exc:
             log(f"TSBPE Plumbing scrape failed: {exc}", "error")
