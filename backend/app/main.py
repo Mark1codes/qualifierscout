@@ -462,6 +462,10 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
             from app.services.apollo_enrichment import enrich_with_apollo
             log("Running Premium Apollo API enrichment...")
             records = await enrich_with_apollo(records, log)
+
+            from app.services.zerobounce_verifier import verify_emails_with_zerobounce
+            log("Running ZeroBounce email deliverability verification...")
+            records = await verify_emails_with_zerobounce(records, log)
         else:
             log("Enrichment disabled. Skipping Ghost Hunter pipeline.")
             
