@@ -575,7 +575,7 @@ export function App() {
                       }}
                     />
                   </Field>
-                  <Field label="Enable Ghost Hunter (Apollo + LinkedIn)">
+                  <Field label="Enable Lead Enrichment & Verification (Apollo + ZeroBounce)">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
                       <input
                         type="checkbox"
@@ -584,7 +584,7 @@ export function App() {
                         style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                       />
                       <span style={{ fontSize: '0.9rem', color: 'var(--slate-400)' }}>
-                        Automatically find contact info
+                        Automatically find contact info & verify email deliverability
                       </span>
                     </div>
                   </Field>
