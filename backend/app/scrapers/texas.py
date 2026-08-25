@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import json
 import re
 from pathlib import Path
@@ -13,15 +14,12 @@ BASE_URL = "https://www.tdlr.texas.gov/LicenseSearch/"
 SEARCH_URL = BASE_URL + "LicenseSearch.asp"
 RESULTS_URL = BASE_URL + "SearchResultsListBrowse.asp"
 
-# Texas TDLR does NOT issue General Contractor licenses (TX has no statewide GC license).
-# Regulated contractor types with COMPANY-level licenses on TDLR:
-#   AIRREF  = Air Conditioning / Refrigeration Contractors (TACLA prefix) — B2B goldmine
-#   ELCTRC  = Electrical Contractors (company license, EEC prefix)
-#   ELEVTR  = Elevator Contractors (company license)
-#   MOLD    = Mold Remediation Companies
-#   WWDRLL  = Water Well Drillers / Pump Installers
-# Texas Department of Licensing and Regulation (TDLR) Search Mapping
+# Texas Licensing Mapping
+# TDLR: HVAC (AIRREF), Electrical (ELCTRC), Elevator (ELEVTR), Mold (MOLD), Water Well (WWDRLL)
+# TSBPE: Plumbing Contractor (RMP - Responsible Master Plumber)
 TX_LICENSE_TYPE_MAP = {
+    "Plumbing Contractor": "PLUMBING",
+    "Plumbing": "PLUMBING",
     "HVAC Contractor": "AIRREF",
     "Electrical Contractor": "ELCTRC",
     "Elevator Contractor": "ELEVTR",
@@ -32,9 +30,9 @@ TX_LICENSE_TYPE_MAP = {
 
 
 class TexasScraper:
-    """Scraper implementation for Texas Department of Licensing and Regulation (TDLR)."""
+    """Scraper implementation for Texas licensing (TDLR & TSBPE)."""
 
-    name = "Texas TDLR"
+    name = "Texas Licensing"
 
     def __init__(self, raw_dir: Path) -> None:
         self.raw_dir = raw_dir
@@ -42,16 +40,20 @@ class TexasScraper:
 
     async def scrape(self, request: ScrapeStartRequest, run_id: int, log) -> list[dict]:
         """Execute license search for Texas contractors."""
-        log("Opening Texas TDLR license search...")
+        log("Opening Texas contractor license portal...")
 
-        if request.license_type in ("General Contractor", "Residential Contractor", "Building Contractor"):
-            log(
-                f"NOTE: Texas has no statewide '{request.license_type}' license. "
-                f"Scraping HVAC Contractor company licenses (TACLA) as the closest regulated equivalent.",
-                "warning",
-            )
+        if "Plumb" in request.license_type:
+            records = await self._scrape_tsbpe_plumbing(request, log)
+        else:
+            if request.license_type in ("General Contractor", "Residential Contractor", "Building Contractor"):
+                log(
+                    f"NOTE: Texas has no statewide '{request.license_type}' license. "
+                    f"Scraping HVAC Contractor company licenses (TACLA) as the closest regulated equivalent.",
+                    "warning",
+                )
 
-        records = await self._try_public_search(request, log)
+            records = await self._try_public_search(request, log)
+
         if not records:
             log("Live source returned no records or blocked the request.", "warning")
 
@@ -183,3 +185,62 @@ class TexasScraper:
                 })
 
         return records
+
+    async def _scrape_tsbpe_plumbing(self, request: ScrapeStartRequest, log) -> list[dict]:
+        """Scrape Texas Responsible Master Plumber (RMP) companies from TSBPE state registry."""
+        url = "https://tsbpe.texas.gov/download-csv/RMP/"
+        city_filter = (request.city or "").upper().strip()
+
+        log("Fetching Texas State Board of Plumbing Examiners (TSBPE) registry...")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        }
+
+        records = []
+        try:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
+                r = await client.get(url, headers=headers)
+                if r.status_code != 200:
+                    log(f"TSBPE endpoint returned status code {r.status_code}", "error")
+                    return []
+
+                lines = r.text.splitlines()
+                reader = csv.DictReader(lines)
+
+                for row in reader:
+                    row_city = (row.get("CITY") or "").upper().strip()
+
+                    # City filter if provided by user
+                    if city_filter and city_filter not in row_city:
+                        continue
+
+                    first = (row.get("FIRST_NAME") or "").strip().title()
+                    last = (row.get("LAST_NAME") or "").strip().title()
+                    full_name = f"{first} {last}".strip()
+                    company = (row.get("PLUMB_COMPANY") or "").strip().title() or full_name
+
+                    raw_status = (row.get("LIC_STATUS") or "").strip()
+                    status = "Active" if raw_status == "Current" else (raw_status.capitalize() or "Active")
+
+                    records.append({
+                        "source_url": "https://tsbpe.texas.gov/download-csv/RMP/",
+                        "contractor_name": full_name,
+                        "company_name": company,
+                        "license_number": f"RMP-{row.get('LICENSE_NBR', '')}",
+                        "license_type": "Plumbing Contractor",
+                        "license_status": status,
+                        "expiration_date": row.get("EXPIRATION_DTE", ""),
+                        "address": f"{row.get('ADDR1', '')} {row.get('ADDR2', '')}".strip(),
+                        "city": row.get("CITY", "").title(),
+                        "state": "TX",
+                        "zip_code": row.get("ZIP", ""),
+                        "phone": row.get("PHONE", ""),
+                        "title": "Responsible Master Plumber / Owner",
+                    })
+
+                log(f"Extracted {len(records)} Texas Plumbing Contractor records from TSBPE.")
+                return records
+
+        except Exception as exc:
+            log(f"TSBPE Plumbing scrape failed: {exc}", "error")
+            return []

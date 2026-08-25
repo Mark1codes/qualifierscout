@@ -108,6 +108,7 @@ const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
     "Roofing Contractor",
   ],
   Texas: [
+    "Plumbing Contractor",
     "HVAC Contractor",
     "Electrical Contractor",
     "Elevator Contractor",
