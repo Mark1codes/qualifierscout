@@ -131,6 +131,16 @@ const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
     "Roofing Contractor",
     "HVAC Contractor",
     "Plumbing Contractor",
+  ],
+  Arizona: [
+    "A-4 Drilling",
+    "Well Drilling Contractor",
+    "General Contractor",
+    "Electrical Contractor",
+    "Plumbing Contractor",
+    "HVAC Contractor",
+    "Roofing Contractor",
+    "Solar Contractor",
   ]
 };
 

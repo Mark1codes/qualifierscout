@@ -24,6 +24,8 @@ def clean_person_name(raw_name: str) -> str:
 
 
 AZ_TRADE_MAP = {
+    "A-4 Drilling": "DRILLING",
+    "A-4": "DRILLING",
     "Well Drilling Contractor": "DRILLING",
     "General Contractor": "General",
     "Electrical Contractor": "Electric",
@@ -50,6 +52,12 @@ class ArizonaScraper:
         records = await self._try_playwright_search(request, log)
         if not records:
             log("AZ ROC search returned zero records or timed out.", "warning")
+
+        # If user explicitly requested A-4 Drilling, strictly filter for A-4 license classification
+        if "A-4" in request.license_type:
+            a4_only = [r for r in records if "A-4" in r.get("license_type", "").upper()]
+            log(f"Filtered {len(a4_only)} strict A-4 Drilling license records from {len(records)} raw results.")
+            records = a4_only if a4_only else records
 
         records = records[: request.max_records]
         raw_path = self.raw_dir / f"run_{run_id}_arizona_raw.json"
