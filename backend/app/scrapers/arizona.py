@@ -72,8 +72,14 @@ class ArizonaScraper:
         try:
             city_query = (request.city or "").upper().strip()
             mapped_trade = AZ_TRADE_MAP.get(request.license_type, request.license_type)
-            trade_query = mapped_trade if request.license_type != "default" else "Contractor"
-            search_keyword = f"{city_query}" if city_query else f"{trade_query}"
+
+            # Prioritize specific trade search term over city query
+            if request.license_type not in ("default", "General Contractor"):
+                search_keyword = mapped_trade
+            elif city_query:
+                search_keyword = city_query
+            else:
+                search_keyword = mapped_trade if mapped_trade != "default" else "Contractor"
 
             log(f"Searching Arizona ROC portal for '{search_keyword}'...")
 
@@ -84,30 +90,37 @@ class ArizonaScraper:
                 )
                 page = await context.new_page()
 
-                await page.goto(SEARCH_URL, wait_until="networkidle", timeout=30000)
+                async def handle_response(response):
+                    if "getRecords" in response.url or "ARCP_ContractorSearch" in response.url:
+                        try:
+                            data = await response.json()
+                            if isinstance(data, dict) and "actions" in data:
+                                for action in data["actions"]:
+                                    if action.get("state") == "SUCCESS" and "returnValue" in action:
+                                        for item in action["returnValue"]:
+                                            parsed = self._parse_apex_record(item, request.license_type)
+                                            if parsed:
+                                                captured_records.append(parsed)
+                        except Exception:
+                            pass
+
+                page.on("response", handle_response)
+
+                await page.goto(SEARCH_URL, wait_until="networkidle", timeout=35000)
 
                 search_input = page.locator("input[placeholder*='search terms']")
                 await search_input.fill(search_keyword)
                 await page.wait_for_timeout(500)
 
-                # Expect Apex response when submitting search
-                async with page.expect_response(
-                    lambda r: "getRecords" in r.url or "ARCP_ContractorSearch" in r.url,
-                    timeout=15000,
-                ) as resp_info:
-                    await search_input.press("Enter")
+                # Press Enter and click Search button
+                await search_input.press("Enter")
+                try:
+                    search_btn = page.locator("button:has-text('Search')").first
+                    await search_btn.click(timeout=3000)
+                except Exception:
+                    pass
 
-                response = await resp_info.value
-                data = await response.json()
-
-                if isinstance(data, dict) and "actions" in data:
-                    for action in data["actions"]:
-                        if action.get("state") == "SUCCESS" and "returnValue" in action:
-                            for item in action["returnValue"]:
-                                parsed = self._parse_apex_record(item, request.license_type)
-                                if parsed:
-                                    captured_records.append(parsed)
-
+                await page.wait_for_timeout(7000)
                 await browser.close()
 
             log(f"Extracted {len(captured_records)} Arizona ROC contractor records.")
