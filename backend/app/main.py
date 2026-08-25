@@ -57,6 +57,10 @@ try:
     from app.scrapers.colorado import ColoradoScraper
 except ImportError:
     ColoradoScraper = None
+try:
+    from app.scrapers.arizona import ArizonaScraper
+except ImportError:
+    ArizonaScraper = None
 
 SCRAPER_REGISTRY = {
     "North Carolina": NorthCarolinaScraper,
@@ -69,6 +73,7 @@ SCRAPER_REGISTRY = {
     "Alaska": AlaskaScraper,
     "Utah": UtahScraper,
     "Colorado": ColoradoScraper,
+    "Arizona": ArizonaScraper,
 }
 
 BASE_DIR = Path(__file__).resolve().parents[1]
