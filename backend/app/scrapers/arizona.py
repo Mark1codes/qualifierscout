@@ -25,7 +25,6 @@ def clean_person_name(raw_name: str) -> str:
     """
     if not raw_name:
         return ""
-    # Strip parentheses and roles
     clean = re.sub(r"\([^)]*\)", "", raw_name).strip()
     return clean.title()
 
@@ -62,9 +61,10 @@ class ArizonaScraper:
 
         # If user explicitly requested A-4 Drilling, strictly filter for A-4 license classification
         if "A-4" in request.license_type:
-            a4_only = [r for r in records if "A-4" in r.get("license_type", "").upper()]
-            log(f"Filtered {len(a4_only)} strict A-4 Drilling license records from {len(records)} raw results.")
-            records = a4_only if a4_only else records
+            a4_only = [r for r in records if "A-4" in r.get("license_type", "").upper() or "DRILLING" in r.get("license_type", "").upper()]
+            log(f"Filtered {len(a4_only)} strict Drilling license records from {len(records)} raw results.")
+            if a4_only:
+                records = a4_only
 
         records = records[: request.max_records]
         raw_path = self.raw_dir / f"run_{run_id}_arizona_raw.json"
@@ -80,7 +80,7 @@ class ArizonaScraper:
             city_query = (request.city or "").upper().strip()
             mapped_trade = AZ_TRADE_MAP.get(request.license_type, request.license_type)
 
-            # Prioritize specific trade search term over city query
+            # Prioritize trade query when selected
             if request.license_type not in ("default", "General Contractor"):
                 search_keyword = mapped_trade
             elif city_query:
@@ -105,17 +105,17 @@ class ArizonaScraper:
                                 for action in data["actions"]:
                                     if action.get("state") == "SUCCESS" and "returnValue" in action:
                                         for item in action["returnValue"]:
-                                            parsed = self._parse_apex_record(item, request.license_type)
-                                            if parsed:
-                                                captured_records.append(parsed)
+                                            parsed_items = self._parse_apex_record(item, request.license_type)
+                                            captured_records.extend(parsed_items)
                         except Exception:
                             pass
 
                 page.on("response", handle_response)
 
-                await page.goto(SEARCH_URL, wait_until="networkidle", timeout=35000)
+                await page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=30000)
 
                 search_input = page.locator("input[placeholder*='search terms']")
+                await search_input.wait_for(state="visible", timeout=15000)
                 await search_input.fill(search_keyword)
                 await page.wait_for_timeout(500)
 
@@ -127,7 +127,12 @@ class ArizonaScraper:
                 except Exception:
                     pass
 
-                await page.wait_for_timeout(7000)
+                # Poll for up to 10 seconds for Apex response arrival
+                for _ in range(10):
+                    await page.wait_for_timeout(1000)
+                    if len(captured_records) >= 10:
+                        break
+
                 await browser.close()
 
             log(f"Extracted {len(captured_records)} Arizona ROC contractor records.")
@@ -137,13 +142,13 @@ class ArizonaScraper:
             log(f"Arizona Playwright search failed: {exc}", "error")
             return []
 
-    def _parse_apex_record(self, item: dict, requested_license_type: str) -> dict | None:
-        """Parse raw Arizona Apex record into QualifierScout lead format compatible with Apollo."""
+    def _parse_apex_record(self, item: dict, requested_license_type: str) -> list[dict]:
+        """Parse raw Arizona Apex record into QualifierScout lead formats for each license held."""
+        results = []
         acc_name = (item.get("accountName") or "").strip()
         dba_name = (item.get("accountDbaName") or "").strip()
         phone = (item.get("phone") or "").strip()
 
-        # Clean DBA name prefix if present (e.g. 'DBA : Phoenix Plumbing' -> 'Phoenix Plumbing')
         if dba_name.upper().startswith("DBA :"):
             dba_name = dba_name[5:].strip()
 
@@ -156,27 +161,12 @@ class ArizonaScraper:
             raw_cname = contact.get("contactName") or ""
             cleaned = clean_person_name(raw_cname)
             if cleaned:
-                # Prioritize Qualifying Party or Member
                 if "Qualifying Party" in raw_cname or "Member" in raw_cname or not contractor_name:
                     contractor_name = cleaned
                     if "Qualifying Party" in raw_cname:
                         break
 
-        # License details
-        lic_data = item.get("licenseData") or []
-        lic_no = ""
-        lic_status = "Active"
-        lic_type = requested_license_type
-
-        if lic_data:
-            first_lic = lic_data[0]
-            lic_no = first_lic.get("licenseNo") or ""
-            lic_status = first_lic.get("status") or "Active"
-            lic_type = first_lic.get("subType") or requested_license_type
-            if first_lic.get("qpName") and not contractor_name:
-                contractor_name = first_lic.get("qpName").title()
-
-        # Location parsing (e.g. 'Apache Junction, AZ, 85120')
+        # Location parsing
         address_raw = item.get("address") or ""
         city = ""
         state = "AZ"
@@ -191,20 +181,44 @@ class ArizonaScraper:
             if len(parts) >= 3:
                 zip_code = parts[2]
 
-        if not lic_no and not company_name:
-            return None
+        lic_data = item.get("licenseData") or []
+        if not lic_data:
+            if company_name:
+                results.append({
+                    "source_url": SEARCH_URL,
+                    "contractor_name": contractor_name,
+                    "company_name": company_name,
+                    "license_number": "",
+                    "license_type": requested_license_type,
+                    "license_status": "Active",
+                    "expiration_date": "",
+                    "address": address_raw,
+                    "city": city,
+                    "state": state,
+                    "zip_code": zip_code,
+                    "phone": phone,
+                })
+        else:
+            for lic in lic_data:
+                lic_no = lic.get("licenseNo") or ""
+                lic_status = lic.get("status") or "Active"
+                lic_type = lic.get("subType") or requested_license_type
+                qp_name = (lic.get("qpName") or "").title()
+                final_contractor = contractor_name or qp_name
 
-        return {
-            "source_url": SEARCH_URL,
-            "contractor_name": contractor_name,
-            "company_name": company_name,
-            "license_number": lic_no,
-            "license_type": lic_type,
-            "license_status": lic_status,
-            "expiration_date": "",
-            "address": address_raw,
-            "city": city,
-            "state": state,
-            "zip_code": zip_code,
-            "phone": phone,
-        }
+                results.append({
+                    "source_url": SEARCH_URL,
+                    "contractor_name": final_contractor,
+                    "company_name": company_name,
+                    "license_number": lic_no,
+                    "license_type": lic_type,
+                    "license_status": lic_status,
+                    "expiration_date": "",
+                    "address": address_raw,
+                    "city": city,
+                    "state": state,
+                    "zip_code": zip_code,
+                    "phone": phone,
+                })
+
+        return results

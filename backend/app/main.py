@@ -171,6 +171,7 @@ STATE_MAP = {
     "Alaska": ["Alaska", "AK"],
     "Utah": ["Utah", "UT"],
     "Colorado": ["Colorado", "CO"],
+    "Arizona": ["Arizona", "AZ"],
     "FL": ["Florida", "FL"],
     "CA": ["California", "CA"],
     "GA": ["Georgia", "GA"],
@@ -181,6 +182,7 @@ STATE_MAP = {
     "AK": ["Alaska", "AK"],
     "UT": ["Utah", "UT"],
     "CO": ["Colorado", "CO"],
+    "AZ": ["Arizona", "AZ"],
 }
 
 
