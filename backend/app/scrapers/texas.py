@@ -73,7 +73,7 @@ class TexasScraper:
                 soup = BeautifulSoup(r.content, "html.parser")
                 form = soup.find("form")
                 action = form.get("action", "") if form else ""
-                full_url = urljoin(BASE_URL, action) if action else RESULTS_URL
+                full_url = "https://www.tdlr.texas.gov/LicenseSearch/SearchResultsListBrowse.asp?from=search"
 
                 # TDLR city search field requires 20-character padding
                 city_padded = city.ljust(20)
@@ -125,7 +125,7 @@ class TexasScraper:
                     continue
 
                 # Detect header row
-                if "License#" in cells[0] or "License#" in str(cells):
+                if any("License" in c for c in cells):
                     header_found = True
                     continue
 
@@ -137,10 +137,9 @@ class TexasScraper:
                 name_raw = cells[2].strip() if len(cells) > 2 else ""
                 row_city = cells[3].strip() if len(cells) > 3 else city
                 row_zip = cells[4].strip() if len(cells) > 4 else ""
-                county = cells[5].strip() if len(cells) > 5 else ""
                 phone = cells[6].strip() if len(cells) > 6 else ""
 
-                if not lic_num or not name_raw or not re.match(r"[A-Z]+\d+", lic_num):
+                if not lic_num or not name_raw or not re.search(r"[A-Za-z]+.*?\d+", lic_num):
                     continue
 
                 exp_date = ""
@@ -173,7 +172,7 @@ class TexasScraper:
                 records.append({
                     "source_url":       BASE_URL,
                     "contractor_name":  contractor_name,
-                    "company_name":     company_name,
+                    "company_name":     company_name or contractor_name,
                     "license_number":   lic_num,
                     "license_type":     license_type,
                     "license_status":   status,
