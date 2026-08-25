@@ -23,6 +23,17 @@ def clean_person_name(raw_name: str) -> str:
     return clean.title()
 
 
+AZ_TRADE_MAP = {
+    "Well Drilling Contractor": "DRILLING",
+    "General Contractor": "General",
+    "Electrical Contractor": "Electric",
+    "Plumbing Contractor": "Plumbing",
+    "HVAC Contractor": "HVAC",
+    "Roofing Contractor": "Roofing",
+    "Solar Contractor": "Solar",
+}
+
+
 class ArizonaScraper:
     """Scraper implementation for Arizona Registrar of Contractors (AZ ROC)."""
 
@@ -51,9 +62,10 @@ class ArizonaScraper:
         captured_records = []
 
         try:
-            city_query = (request.city or "PHOENIX").upper().strip()
-            trade_query = request.license_type if request.license_type != "default" else "Contractor"
-            search_keyword = f"{city_query}" if request.city else f"{trade_query}"
+            city_query = (request.city or "").upper().strip()
+            mapped_trade = AZ_TRADE_MAP.get(request.license_type, request.license_type)
+            trade_query = mapped_trade if request.license_type != "default" else "Contractor"
+            search_keyword = f"{city_query}" if city_query else f"{trade_query}"
 
             log(f"Searching Arizona ROC portal for '{search_keyword}'...")
 
