@@ -1,0 +1,88 @@
+"""
+ZeroBounce Email Deliverability Verification Service.
+Validates email addresses discovered via Apollo or Web Enrichment using ZeroBounce API v2.
+"""
+from __future__ import annotations
+
+import os
+from typing import Any, Callable, Dict, List
+
+import httpx
+
+ZEROBOUNCE_API_URL = "https://api.zerobounce.net/v2/validate"
+
+
+async def verify_emails_with_zerobounce(
+    records: List[Dict[str, Any]],
+    log: Callable[[str, str], None]
+) -> List[Dict[str, Any]]:
+    """
+    Validates emails in records using ZeroBounce API.
+    Updates `verification_status` and removes invalid/spam-trap emails.
+    """
+    api_key = os.getenv("ZEROBOUNCE_API_KEY", "").strip()
+    if not api_key:
+        log("ZeroBounce API key not configured in .env. Skipping email deliverability verification.", "info")
+        return records
+
+    target_records = [r for r in records if r.get("email")]
+    if not target_records:
+        log("No emails found to verify with ZeroBounce.", "info")
+        return records
+
+    log(f"Starting ZeroBounce email deliverability verification for {len(target_records)} emails...")
+
+    valid_count = 0
+    invalid_count = 0
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for record in records:
+            email = record.get("email", "").strip()
+            if not email:
+                continue
+
+            try:
+                params = {
+                    "api_key": api_key,
+                    "email": email,
+                }
+                response = await client.get(ZEROBOUNCE_API_URL, params=params)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    status = (data.get("status") or "").lower().strip()
+                    sub_status = data.get("sub_status") or ""
+
+                    if status == "valid":
+                        record["verification_status"] = "Verified"
+                        valid_count += 1
+                        log(f"ZeroBounce: Email '{email}' is VALID (Deliverable).", "info")
+
+                    elif status in ("invalid", "spamtrap", "abuse", "do_not_mail"):
+                        record["verification_status"] = "Invalid"
+                        record["email"] = ""  # Clear invalid email to prevent bounces
+                        invalid_count += 1
+                        log(
+                            f"ZeroBounce: Email '{email}' is {status.upper()} ({sub_status}). Stripped email to prevent bounces.",
+                            "warning"
+                        )
+
+                    elif status in ("catch-all", "catch_all", "unknown"):
+                        record["verification_status"] = "Catch-All"
+                        log(
+                            f"ZeroBounce: Email '{email}' status is {status.upper()}. Marked as Catch-All.",
+                            "info"
+                        )
+
+                    else:
+                        record["verification_status"] = status.capitalize() or "Unverified"
+                        log(f"ZeroBounce: Email '{email}' return status '{status}'.", "info")
+
+                else:
+                    log(f"ZeroBounce API returned status {response.status_code} for '{email}'.", "warning")
+
+            except Exception as exc:
+                log(f"ZeroBounce verification error for '{email}': {exc}", "warning")
+
+    log(f"ZeroBounce verification completed: {valid_count} Valid, {invalid_count} Invalid/Stripped.")
+    return records
