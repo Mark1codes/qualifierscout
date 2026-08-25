@@ -221,6 +221,16 @@ class NevadaScraper:
                         m_class = re.search(r"Classifications\s*:\s*(.*)", cell2, re.I)
                         lic_class = m_class.group(1).strip() if m_class else request.license_type
 
+                        # Strict filtering for Plumbing Contractors: Keep C-1D & C-1 (Full), exclude sub-codes like C-1A (Boiler), C-1H (Water Heaters), etc.
+                        if "Plumb" in request.license_type:
+                            upper_class = lic_class.upper()
+                            is_c1d = bool(re.search(r"\bC-?1D\b", upper_class))
+                            is_c1_full = bool(re.search(r"\bC-?1\s+PLUMBING\b", upper_class)) and not bool(re.search(r"\bC-?1[A-CE-Z]\b", upper_class))
+                            has_limitation = bool(re.search(r"\b(RADON|FIRE|SOLAR|SHEET METAL|INSULATION|BOILER)\b", upper_class))
+
+                            if not ((is_c1d or is_c1_full) and not has_limitation):
+                                continue
+
                         # Extract cell3: Expires, Status
                         m_exp = re.search(r"Expires\s*:\s*(\d{2}-\d{2}-\d{4}|\d{2}/\d{2}/\d{4})", cell3, re.I)
                         expiration = m_exp.group(1) if m_exp else ""
@@ -245,7 +255,7 @@ class NevadaScraper:
                             "phone": phone
                         })
 
-                log(f"Extracted {len(records)} Nevada records from NSCB.")
+                log(f"Extracted {len(records)} strict Nevada records from NSCB.")
                 return records
 
         except Exception as exc:
