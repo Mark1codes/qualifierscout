@@ -2,6 +2,8 @@ import asyncio
 import csv
 import json
 import re
+import sys
+import subprocess
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -60,7 +62,7 @@ class TexasScraper:
         records = records[: request.max_records]
         raw_path = self.raw_dir / f"run_{run_id}_texas_raw.json"
         raw_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
-        log(f"Saved raw records to {raw_path.name}.")
+        log(f"Saved {len(records)} raw records to {raw_path.name}.")
         return records
 
     async def _try_public_search(self, request: ScrapeStartRequest, log) -> list[dict]:
@@ -69,13 +71,7 @@ class TexasScraper:
             city = (request.city or "Houston").upper().strip()
 
             async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
-                r = await client.get(SEARCH_URL)
-                soup = BeautifulSoup(r.content, "html.parser")
-                form = soup.find("form")
-                action = form.get("action", "") if form else ""
                 full_url = "https://www.tdlr.texas.gov/LicenseSearch/SearchResultsListBrowse.asp?from=search"
-
-                # TDLR city search field requires 20-character padding
                 city_padded = city.ljust(20)
 
                 payload = {
@@ -96,7 +92,6 @@ class TexasScraper:
 
                 records = self._parse_results(soup2, city, request.license_type, log)
 
-                # Fallback to statewide query if city search yields zero records
                 if not records:
                     log(f"No results for {city}. Trying statewide search...", "warning")
                     payload["phy_city"] = ""
@@ -124,7 +119,6 @@ class TexasScraper:
                 if not cells:
                     continue
 
-                # Detect header row
                 if any("License" in c for c in cells):
                     header_found = True
                     continue
@@ -159,7 +153,6 @@ class TexasScraper:
                 if paren_match:
                     raw_person = paren_match.group(1).strip()
                     company_name = paren_match.group(2).strip()
-
                     parts = [p.strip() for p in raw_person.split(",") if p.strip()]
                     contractor_name = f"{parts[1]} {parts[0]}" if len(parts) == 2 else raw_person
                 else:
@@ -191,47 +184,49 @@ class TexasScraper:
         city_filter = (request.city or "").upper().strip()
 
         log("Fetching Texas State Board of Plumbing Examiners (TSBPE) registry...")
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        }
-
         records = []
         csv_text = ""
+
+        # Method 1: Try native curl command (bypasses Cloudflare HTTP 403 blocks instantly)
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15) as client:
-                r = await client.get(url, headers=headers)
-                if r.status_code == 200:
-                    csv_text = r.text
-                else:
-                    log(f"TSBPE direct endpoint returned status code {r.status_code}. Bypassing with Playwright stealth...", "warning")
+            cmd = [
+                "curl.exe" if sys.platform == "win32" else "curl",
+                "-sSL",
+                "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "-H", "Accept-Language: en-US,en;q=0.9",
+                url
+            ]
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await process.communicate()
+            if process.returncode == 0 and len(stdout) > 1000:
+                csv_text = stdout.decode("utf-8", errors="ignore")
+                log("Successfully fetched TSBPE registry data via native curl engine.")
+        except Exception as curl_exc:
+            log(f"Native curl download failed: {curl_exc}", "warning")
 
-            if not csv_text:
-                from playwright.async_api import async_playwright
-                async with async_playwright() as p:
-                    browser = await p.chromium.launch(headless=True)
-                    context = await browser.new_context(user_agent=headers["User-Agent"])
-                    page = await context.new_page()
-                    try:
-                        async with page.expect_download(timeout=20000) as download_info:
-                            try:
-                                await page.goto(url, timeout=20000)
-                            except Exception as goto_err:
-                                if "Download is starting" not in str(goto_err):
-                                    raise goto_err
+        # Method 2: Try httpx AsyncClient fallback
+        if not csv_text:
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                }
+                async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=15) as client:
+                    r = await client.get(url, headers=headers)
+                    if r.status_code == 200:
+                        csv_text = r.text
+            except Exception:
+                pass
 
-                        download = await download_info.value
-                        temp_path = self.raw_dir / f"tsbpe_temp_{request.city or 'all'}.csv"
-                        await download.save_as(temp_path)
-                        csv_text = temp_path.read_text(encoding="utf-8", errors="ignore")
-                        if temp_path.exists():
-                            temp_path.unlink()
-                    finally:
-                        await browser.close()
+        if not csv_text:
+            log("Failed to retrieve TSBPE CSV data.", "error")
+            return []
 
-            if not csv_text:
-                log("Failed to retrieve TSBPE CSV data.", "error")
-                return []
-
+        try:
             lines = csv_text.splitlines()
             reader = csv.DictReader(lines)
 
@@ -270,5 +265,5 @@ class TexasScraper:
             return records
 
         except Exception as exc:
-            log(f"TSBPE Plumbing scrape failed: {exc}", "error")
+            log(f"TSBPE Plumbing parse failed: {exc}", "error")
             return []
