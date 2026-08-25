@@ -221,6 +221,11 @@ class NevadaScraper:
                         m_class = re.search(r"Classifications\s*:\s*(.*)", cell2, re.I)
                         lic_class = m_class.group(1).strip() if m_class else request.license_type
 
+                        # Clean administrative notes (e.g., "C-1D Plumbing 07/10/2025- BROADENING APP...") down to clean classification title
+                        m_clean_class = re.search(r"^(C-?1[A-Z]?\s+[A-Za-z\s&]+)", lic_class, re.I)
+                        if m_clean_class:
+                            lic_class = m_clean_class.group(1).strip()
+
                         # Strict filtering for Plumbing Contractors: Keep C-1D & C-1 (Full), exclude sub-codes like C-1A (Boiler), C-1H (Water Heaters), etc.
                         if "Plumb" in request.license_type:
                             upper_class = lic_class.upper()
