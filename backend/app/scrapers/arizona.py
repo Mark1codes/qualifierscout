@@ -1,7 +1,14 @@
+import sys
 import asyncio
 import json
 import re
 from pathlib import Path
+
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
 
 from playwright.async_api import async_playwright
 from app.schemas import ScrapeStartRequest
