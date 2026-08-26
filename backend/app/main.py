@@ -316,14 +316,15 @@ def export_leads(request: ExportRequest) -> FileResponse:
     if request.run_id is not None:
         where_clauses.append("run_id = ?")
         params.append(request.run_id)
-    if request.state and request.state != "all":
-        st_list = STATE_MAP.get(request.state, [request.state])
-        placeholders = ", ".join(["?"] * len(st_list))
-        where_clauses.append(f"state IN ({placeholders})")
-        params.extend(st_list)
-    if request.city and request.city != "all":
-        where_clauses.append("city = ?")
-        params.append(request.city)
+    else:
+        if request.state and request.state != "all":
+            st_list = STATE_MAP.get(request.state, [request.state])
+            placeholders = ", ".join(["?"] * len(st_list))
+            where_clauses.append(f"state IN ({placeholders})")
+            params.extend(st_list)
+        if request.city and request.city != "all":
+            where_clauses.append("city = ?")
+            params.append(request.city)
     if request.search:
         where_clauses.append("(company_name LIKE ? OR contractor_name LIKE ? OR license_number LIKE ? OR email LIKE ?)")
         query = f"%{request.search}%"

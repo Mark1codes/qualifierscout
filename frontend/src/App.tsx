@@ -644,12 +644,9 @@ export function App() {
                       </label>
                       <button onClick={() => {
                         const runLeads = leads.filter(l => l.run_id === run?.id);
-                        const runState = runLeads[0]?.state || undefined;
-                        const cities = new Set(runLeads.map(l => l.city).filter(Boolean));
-                        const runCity = cities.size === 1 ? Array.from(cities)[0] : undefined;
                         const types = new Set(runLeads.map(l => l.license_type).filter(Boolean));
                         const runLicenseType = types.size === 1 ? Array.from(types)[0] : types.size > 1 ? "MixedTypes" : undefined;
-                        exportLeads("csv", exportVerifiedOnly, run?.id, runState, runCity, undefined, undefined, runLicenseType);
+                        exportLeads("csv", exportVerifiedOnly, run?.id, state, undefined, undefined, undefined, runLicenseType);
                       }} className="primary-button" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "0.5rem", borderRadius: "6px" }}><Download size={16} /> Export CSV</button>
                     </div>
                   </div>
