@@ -401,6 +401,10 @@ def export_leads(request: ExportRequest) -> FileResponse:
     if request.individuals_only:
         df = df[df["First Name"].str.strip() != ""]
     
+    # Deduplicate export by license_number so each license appears exactly once
+    if "license_number" in df.columns:
+        df.drop_duplicates(subset=["license_number"], inplace=True)
+
     # Format company name to Title Case to prevent ALL CAPS
     df["company_name"] = df["company_name"].apply(lambda x: str(x).title() if pd.notna(x) else x)
     

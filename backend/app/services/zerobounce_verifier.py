@@ -34,11 +34,28 @@ async def verify_emails_with_zerobounce(
 
     valid_count = 0
     invalid_count = 0
+    cache: Dict[str, Dict[str, Any]] = {}
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         for record in records:
             email = record.get("email", "").strip()
             if not email:
+                continue
+
+            if email in cache:
+                data = cache[email]
+                status = data.get("status", "")
+                if status == "valid":
+                    record["verification_status"] = "Verified"
+                    valid_count += 1
+                elif status in ("invalid", "spamtrap", "abuse", "do_not_mail"):
+                    record["verification_status"] = "Invalid"
+                    record["email"] = ""
+                    invalid_count += 1
+                elif status in ("catch-all", "catch_all", "unknown"):
+                    record["verification_status"] = "Catch-All"
+                else:
+                    record["verification_status"] = status.capitalize() or "Unverified"
                 continue
 
             try:
@@ -50,6 +67,7 @@ async def verify_emails_with_zerobounce(
 
                 if response.status_code == 200:
                     data = response.json()
+                    cache[email] = data
                     status = (data.get("status") or "").lower().strip()
                     sub_status = data.get("sub_status") or ""
 
