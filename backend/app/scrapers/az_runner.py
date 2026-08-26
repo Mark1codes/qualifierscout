@@ -74,19 +74,22 @@ def parse_apex_record(item: dict, requested_license_type: str) -> list[dict]:
             })
     else:
         for lic in lic_data:
-            lic_num = (lic.get("licenseNumber") or "").strip()
+            lic_num = (lic.get("licenseNo") or lic.get("licenseNumber") or "").strip()
+            sub_type = (lic.get("subType") or "").strip()
             lic_class = (lic.get("licenseClassification") or "").strip()
             lic_desc = (lic.get("licenseDescription") or "").strip()
-            lic_status = (lic.get("licenseStatus") or "").strip()
+            lic_status = (lic.get("status") or lic.get("licenseStatus") or "").strip()
 
-            full_lic_type = f"{lic_class} {lic_desc}".strip() or requested_license_type
+            full_lic_type = sub_type or f"{lic_class} {lic_desc}".strip() or requested_license_type
             status = "Active" if lic_status.upper() == "ACTIVE" else (lic_status.capitalize() or "Active")
+
+            formatted_lic_num = lic_num if lic_num.startswith("ROC") else f"ROC {lic_num}" if lic_num else ""
 
             results.append({
                 "source_url": SEARCH_URL,
                 "contractor_name": contractor_name,
                 "company_name": company_name,
-                "license_number": f"ROC {lic_num}" if lic_num and not lic_num.startswith("ROC") else lic_num,
+                "license_number": formatted_lic_num,
                 "license_type": full_lic_type,
                 "license_status": status,
                 "expiration_date": "",
