@@ -102,7 +102,10 @@ def get_existing_licenses(state: str) -> set[str]:
         "Georgia": "GA",
         "Texas": "TX",
         "Nevada": "NV",
-        "Alaska": "AK"
+        "Alaska": "AK",
+        "Arizona": "AZ",
+        "Colorado": "CO",
+        "Utah": "UT",
     }
     short_state = state_map.get(state, state)
     with get_connection() as conn:
