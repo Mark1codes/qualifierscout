@@ -373,6 +373,7 @@ def export_leads(request: ExportRequest) -> FileResponse:
             last_names.append(parts[0])
             first_names.append(parts[1] if len(parts) > 1 else "")
         else:
+            suffixes = {"JR", "JR.", "SR", "SR.", "II", "III", "IV", "V"}
             parts = target_name.split(" ")
             if len(parts) == 1:
                 first_names.append(parts[0])
@@ -382,9 +383,16 @@ def export_leads(request: ExportRequest) -> FileResponse:
                 first_names.append(" ".join(parts[1:]))
                 last_names.append(parts[0])
             else:
-                # Standard format: FIRST LAST
-                first_names.append(parts[0])
-                last_names.append(" ".join(parts[1:]))
+                # Standard format: FIRST [MIDDLE] LAST [SUFFIX]
+                if len(parts) >= 3 and parts[-1].upper() in suffixes:
+                    first_names.append(" ".join(parts[:-2]))
+                    last_names.append(" ".join(parts[-2:]))
+                elif len(parts) >= 2:
+                    first_names.append(" ".join(parts[:-1]))
+                    last_names.append(parts[-1])
+                else:
+                    first_names.append(parts[0])
+                    last_names.append(" ".join(parts[1:]))
             
     df.insert(4, "First Name", [str(n).title() for n in first_names])
     df.insert(5, "Last Name", [str(n).title() for n in last_names])
