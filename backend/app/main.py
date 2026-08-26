@@ -459,10 +459,11 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
         records = valid_records
         
         # Status Filter: drop leads that don't match the requested active/inactive status
-        status_filtered = [r for r in records if request.license_status.lower() in r.get("license_status", request.license_status).lower()]
-        if len(status_filtered) < len(records):
-            log(f"Status Filter: Dropped {len(records) - len(status_filtered)} leads because they are not {request.license_status}.")
-        records = status_filtered
+        if request.license_status and request.license_status.lower() != "all":
+            status_filtered = [r for r in records if request.license_status.lower() in r.get("license_status", request.license_status).lower()]
+            if len(status_filtered) < len(records):
+                log(f"Status Filter: Dropped {len(records) - len(status_filtered)} leads because they are not {request.license_status}.")
+            records = status_filtered
         
         # Smart Filter: drop already scraped leads before enrichment
         existing = get_existing_licenses(request.state)

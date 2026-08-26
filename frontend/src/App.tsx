@@ -560,8 +560,9 @@ export function App() {
                   </Field>
                   <Field label="License Status">
                     <select value={licenseStatus} onChange={(event) => setLicenseStatus(event.target.value)}>
-                      <option>Active</option>
-                      <option>Inactive</option>
+                      <option value="Active">Active Only</option>
+                      <option value="Inactive">Inactive Only</option>
+                      <option value="All">All Statuses (Active + Inactive)</option>
                     </select>
                   </Field>
                   <Field label="Max Records">
