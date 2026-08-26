@@ -402,8 +402,12 @@ def export_leads(request: ExportRequest) -> FileResponse:
     if request.individuals_only:
         df = df[df["First Name"].str.strip() != ""]
     
-    # Deduplicate export by license_number so each license appears exactly once
-    if "license_number" in df.columns:
+    # Deduplicate export by company_name and person name so each contractor appears exactly once
+    if "company_name" in df.columns and "First Name" in df.columns and "Last Name" in df.columns:
+        # Create a normalized deduplication key combining company name and person name
+        dedup_series = df["company_name"].astype(str).str.upper().str.strip() + "_" + df["First Name"].astype(str).str.upper().str.strip() + "_" + df["Last Name"].astype(str).str.upper().str.strip()
+        df = df.loc[~dedup_series.duplicated(keep="first")].copy()
+    elif "license_number" in df.columns:
         df.drop_duplicates(subset=["license_number"], inplace=True)
 
     # Format company name to Title Case to prevent ALL CAPS
