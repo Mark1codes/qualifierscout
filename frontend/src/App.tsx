@@ -568,7 +568,7 @@ export function App() {
                     <input
                       type="number"
                       min={1}
-                      max={500}
+                      max={5000}
                       value={maxRecords}
                       onChange={(event) => {
                         const val = event.target.value;
