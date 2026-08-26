@@ -2,6 +2,7 @@ import sys
 import asyncio
 import json
 import re
+import subprocess
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -91,20 +92,21 @@ class ArizonaScraper:
                 runner_path = Path(__file__).parent / "az_runner.py"
                 cmd = [sys.executable, str(runner_path), search_keyword, request.license_type]
 
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8"
                 )
-                stdout, stderr = await process.communicate()
 
-                if process.returncode != 0:
-                    err_msg = stderr.decode('utf-8', errors='ignore').strip()
-                    log(f"Arizona runner process attempt {attempt} failed with code {process.returncode}: {err_msg}", "warning")
+                if result.returncode != 0:
+                    err_msg = (result.stderr or "").strip()
+                    log(f"Arizona runner process attempt {attempt} failed with code {result.returncode}: {err_msg}", "warning")
                     await asyncio.sleep(2)
                     continue
 
-                raw_out = stdout.decode("utf-8", errors="ignore").strip()
+                raw_out = (result.stdout or "").strip()
                 start_idx = raw_out.find("[")
                 end_idx = raw_out.rfind("]")
                 if start_idx != -1 and end_idx != -1 and end_idx >= start_idx:
