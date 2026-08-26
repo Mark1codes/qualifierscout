@@ -86,28 +86,42 @@ class ArizonaScraper:
             else:
                 search_keyword = mapped_trade if mapped_trade != "default" else "Contractor"
 
-            log(f"Searching Arizona ROC portal for '{search_keyword}'...")
+            for attempt in range(1, 4):
+                log(f"Searching Arizona ROC portal for '{search_keyword}' (Attempt {attempt}/3)...")
+                runner_path = Path(__file__).parent / "az_runner.py"
+                cmd = [sys.executable, str(runner_path), search_keyword, request.license_type]
 
-            runner_path = Path(__file__).parent / "az_runner.py"
-            cmd = [sys.executable, str(runner_path), search_keyword, request.license_type]
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
 
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
+                if process.returncode != 0:
+                    err_msg = stderr.decode('utf-8', errors='ignore').strip()
+                    log(f"Arizona runner process attempt {attempt} failed with code {process.returncode}: {err_msg}", "warning")
+                    await asyncio.sleep(2)
+                    continue
 
-            if process.returncode != 0:
-                log(f"Arizona runner process failed with code {process.returncode}: {stderr.decode()}", "error")
-                return []
+                raw_out = stdout.decode("utf-8", errors="ignore").strip()
+                start_idx = raw_out.find("[")
+                end_idx = raw_out.rfind("]")
+                if start_idx != -1 and end_idx != -1 and end_idx >= start_idx:
+                    json_str = raw_out[start_idx:end_idx+1]
+                    captured_records = json.loads(json_str)
+                    if captured_records:
+                        log(f"Extracted {len(captured_records)} Arizona ROC contractor records.")
+                        return captured_records
+                
+                log(f"Arizona runner attempt {attempt} returned empty or invalid payload. Retrying...", "warning")
+                await asyncio.sleep(2)
 
-            captured_records = json.loads(stdout.decode("utf-8") or "[]")
-            log(f"Extracted {len(captured_records)} Arizona ROC contractor records.")
-            return captured_records
+            log("Arizona Playwright search failed after 3 attempts.", "error")
+            return []
 
         except Exception as exc:
-            log(f"Arizona Playwright search failed: {exc}", "error")
+            log(f"Arizona Playwright search exception: {exc}", "error")
             return []
 
     def _parse_apex_record(self, item: dict, requested_license_type: str) -> list[dict]:

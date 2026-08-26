@@ -126,21 +126,21 @@ async def run_arizona_search(search_keyword: str, requested_license_type: str):
                         pass
 
             page.on("response", handle_response)
-            await page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=30000)
+            await page.goto(SEARCH_URL, wait_until="networkidle", timeout=45000)
 
             search_input = page.locator("input[placeholder*='search terms']")
-            await search_input.wait_for(state="visible", timeout=15000)
+            await search_input.wait_for(state="visible", timeout=20000)
             await search_input.fill(search_keyword)
             await page.wait_for_timeout(500)
 
             await search_input.press("Enter")
             try:
                 search_btn = page.locator("button:has-text('Search')").first
-                await search_btn.click(timeout=3000)
+                await search_btn.click(timeout=5000)
             except Exception:
                 pass
 
-            for _ in range(12):
+            for _ in range(25):
                 await page.wait_for_timeout(1000)
                 if len(captured_records) >= 10:
                     break
