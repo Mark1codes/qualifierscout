@@ -73,9 +73,7 @@ class ArizonaScraper:
         return records
 
     async def _try_playwright_search(self, request: ScrapeStartRequest, log) -> list[dict]:
-        """Use Playwright to render search form and capture Apex response data."""
-        captured_records = []
-
+        """Use Playwright via isolated subprocess runner to capture Apex response data."""
         try:
             city_query = (request.city or "").upper().strip()
             mapped_trade = AZ_TRADE_MAP.get(request.license_type, request.license_type)
@@ -90,51 +88,21 @@ class ArizonaScraper:
 
             log(f"Searching Arizona ROC portal for '{search_keyword}'...")
 
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                )
-                page = await context.new_page()
+            runner_path = Path(__file__).parent / "az_runner.py"
+            cmd = [sys.executable, str(runner_path), search_keyword, request.license_type]
 
-                async def handle_response(response):
-                    if "getRecords" in response.url or "ARCP_ContractorSearch" in response.url:
-                        try:
-                            data = await response.json()
-                            if isinstance(data, dict) and "actions" in data:
-                                for action in data["actions"]:
-                                    if action.get("state") == "SUCCESS" and "returnValue" in action:
-                                        for item in action["returnValue"]:
-                                            parsed_items = self._parse_apex_record(item, request.license_type)
-                                            captured_records.extend(parsed_items)
-                        except Exception:
-                            pass
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
 
-                page.on("response", handle_response)
+            if process.returncode != 0:
+                log(f"Arizona runner process failed with code {process.returncode}: {stderr.decode()}", "error")
+                return []
 
-                await page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=30000)
-
-                search_input = page.locator("input[placeholder*='search terms']")
-                await search_input.wait_for(state="visible", timeout=15000)
-                await search_input.fill(search_keyword)
-                await page.wait_for_timeout(500)
-
-                # Press Enter and click Search button
-                await search_input.press("Enter")
-                try:
-                    search_btn = page.locator("button:has-text('Search')").first
-                    await search_btn.click(timeout=3000)
-                except Exception:
-                    pass
-
-                # Poll for up to 10 seconds for Apex response arrival
-                for _ in range(10):
-                    await page.wait_for_timeout(1000)
-                    if len(captured_records) >= 10:
-                        break
-
-                await browser.close()
-
+            captured_records = json.loads(stdout.decode("utf-8") or "[]")
             log(f"Extracted {len(captured_records)} Arizona ROC contractor records.")
             return captured_records
 
