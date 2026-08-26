@@ -113,7 +113,7 @@ async def run_arizona_search(search_keyword: str, requested_license_type: str):
             page = await context.new_page()
 
             async def handle_response(response):
-                if "getRecords" in response.url or "ARCP_ContractorSearch" in response.url:
+                if "apex" in response.url.lower() or "aura" in response.url.lower() or "getrecords" in response.url.lower() or "contractorsearch" in response.url.lower():
                     try:
                         data = await response.json()
                         if isinstance(data, dict) and "actions" in data:
@@ -128,8 +128,8 @@ async def run_arizona_search(search_keyword: str, requested_license_type: str):
             page.on("response", handle_response)
             await page.goto(SEARCH_URL, wait_until="networkidle", timeout=45000)
 
-            search_input = page.locator("input[placeholder*='search terms']")
-            await search_input.wait_for(state="visible", timeout=20000)
+            search_input = page.locator("input[placeholder*='search'], input[type='text'], input.slds-input").first
+            await search_input.wait_for(state="visible", timeout=25000)
             await search_input.fill(search_keyword)
             await page.wait_for_timeout(500)
 
