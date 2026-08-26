@@ -140,10 +140,18 @@ async def run_arizona_search(search_keyword: str, requested_license_type: str):
             except Exception:
                 pass
 
-            for _ in range(25):
+            prev_len = 0
+            stable_count = 0
+            for _ in range(20):
                 await page.wait_for_timeout(1000)
-                if len(captured_records) >= 10:
-                    break
+                curr_len = len(captured_records)
+                if curr_len > 0 and curr_len == prev_len:
+                    stable_count += 1
+                    if stable_count >= 3:
+                        break
+                else:
+                    stable_count = 0
+                prev_len = curr_len
 
             await browser.close()
     except Exception as e:
