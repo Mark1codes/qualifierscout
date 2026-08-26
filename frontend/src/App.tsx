@@ -552,6 +552,7 @@ export function App() {
                   </Field>
                   <Field label="City">
                     <select value={city} onChange={(event) => setCity(event.target.value)}>
+                      <option value="">All Cities (Statewide)</option>
                       {(CITIES_BY_STATE[state] || []).map((c) => (
                         <option key={c} value={c}>{c}</option>
                       ))}
