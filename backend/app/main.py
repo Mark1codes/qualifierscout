@@ -605,20 +605,10 @@ def get_stats(conn: sqlite3.Connection) -> dict:
         """
     ).fetchone()
 
-    apollo_requests = conn.execute(
-        "SELECT COUNT(*) FROM scrape_logs WHERE message LIKE '%Searching Apollo database%'"
-    ).fetchone()[0] or 0
-
-    apollo_credits = conn.execute(
-        "SELECT COUNT(*) FROM scrape_logs WHERE message LIKE '%Apollo found Verified email%' OR message LIKE '%Apollo CONSUMED 1 CREDIT%' OR message LIKE '%1 Apollo Credit Used%'"
-    ).fetchone()[0] or 0
-
-    zerobounce_credits = conn.execute(
-        "SELECT COUNT(*) FROM scrape_logs WHERE message LIKE '%ZeroBounce: Email%' OR message LIKE '%1 ZeroBounce Credit Used%'"
-    ).fetchone()[0] or 0
-
     res = {key: row[key] or 0 for key in row.keys()}
-    res["apollo_requests_total"] = apollo_requests
-    res["apollo_credits_total"] = apollo_credits
-    res["zerobounce_credits_total"] = zerobounce_credits
+    from app.db.database import get_total_api_credits
+    credits = get_total_api_credits()
+    res["apollo_requests_total"] = credits["apollo_requests"]
+    res["apollo_credits_total"] = credits["apollo_credits"]
+    res["zerobounce_credits_total"] = credits["zerobounce_credits"]
     return res

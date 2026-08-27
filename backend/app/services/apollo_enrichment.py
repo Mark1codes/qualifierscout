@@ -47,6 +47,9 @@ async def enrich_with_apollo(records: List[Dict[str, Any]], log) -> List[Dict[st
             
             try:
                 log(f"[APOLLO LOG] Searching Apollo database for: {name}...")
+                from app.db.database import log_api_credit
+                log_api_credit("apollo_search", 1, details=f"Apollo search query for {name}")
+
                 response = await client.post(url, json=payload, headers=headers)
                 
                 if response.status_code == 200:
@@ -62,6 +65,7 @@ async def enrich_with_apollo(records: List[Dict[str, Any]], log) -> List[Dict[st
                             if email_status == "verified" or email_status == "extrapolated":
                                 record["email"] = email
                                 apollo_credits_used += 1
+                                log_api_credit("apollo", 1, details=f"Apollo verified email for {name}: {email}")
                                 log(f"[APOLLO CREDIT LOG] Unlocked verified email for '{name}': {email} (1 Apollo Credit Used). Total run Apollo credits: {apollo_credits_used}")
                             else:
                                 log(f"[APOLLO LOG] Apollo found email '{email}' but status was '{email_status}'. Ignoring to prevent bounces.")

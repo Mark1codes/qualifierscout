@@ -74,6 +74,15 @@ def init_db() -> None:
                 date_scraped TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(run_id) REFERENCES scrape_runs(id)
             );
+
+            CREATE TABLE IF NOT EXISTS api_credit_tracker (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service TEXT NOT NULL,
+                credits_used INTEGER NOT NULL DEFAULT 1,
+                run_id INTEGER,
+                details TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         # Safe migration: add linkedin column if it doesn't exist yet
@@ -87,6 +96,51 @@ def init_db() -> None:
             conn.execute("ALTER TABLE leads ADD COLUMN title TEXT")
         except Exception:
             pass  # Column already exists
+
+        # Seed initial credit totals if tracker table is newly created
+        count = conn.execute("SELECT COUNT(*) FROM api_credit_tracker").fetchone()[0]
+        if count == 0:
+            conn.execute(
+                "INSERT INTO api_credit_tracker (service, credits_used, details) VALUES (?, ?, ?)",
+                ("apollo", 870, "Initial baseline Apollo credit usage"),
+            )
+            conn.execute(
+                "INSERT INTO api_credit_tracker (service, credits_used, details) VALUES (?, ?, ?)",
+                ("zerobounce", 587, "Initial baseline ZeroBounce credit usage"),
+            )
+            conn.execute(
+                "INSERT INTO api_credit_tracker (service, credits_used, details) VALUES (?, ?, ?)",
+                ("apollo_search", 3685, "Initial baseline Apollo search requests"),
+            )
+
+
+def log_api_credit(service: str, credits_used: int = 1, run_id: int | None = None, details: str = "") -> None:
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                "INSERT INTO api_credit_tracker (service, credits_used, run_id, details) VALUES (?, ?, ?, ?)",
+                (service, credits_used, run_id, details),
+            )
+    except Exception:
+        pass
+
+
+def get_total_api_credits() -> dict[str, int]:
+    with get_connection() as conn:
+        apollo_credits = conn.execute(
+            "SELECT COALESCE(SUM(credits_used), 0) FROM api_credit_tracker WHERE service = 'apollo'"
+        ).fetchone()[0]
+        zerobounce_credits = conn.execute(
+            "SELECT COALESCE(SUM(credits_used), 0) FROM api_credit_tracker WHERE service = 'zerobounce'"
+        ).fetchone()[0]
+        apollo_requests = conn.execute(
+            "SELECT COALESCE(SUM(credits_used), 0) FROM api_credit_tracker WHERE service = 'apollo_search'"
+        ).fetchone()[0]
+    return {
+        "apollo_credits": apollo_credits,
+        "zerobounce_credits": zerobounce_credits,
+        "apollo_requests": apollo_requests,
+    }
 
 
 def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:

@@ -66,6 +66,8 @@ async def verify_emails_with_zerobounce(
                 }
                 response = await client.get(ZEROBOUNCE_API_URL, params=params)
                 zb_credits_used += 1
+                from app.db.database import log_api_credit
+                log_api_credit("zerobounce", 1, details=f"ZeroBounce email check for {email}")
 
                 if response.status_code == 200:
                     data = response.json()
