@@ -13,6 +13,17 @@ if sys.platform == "win32":
 
 SEARCH_URL = "https://azroc.my.site.com/AZRoc/s/contractor-search"
 
+TRADE_FILTER_KEYWORDS = {
+    "Plumbing Contractor": ["PLUMBING", "C-37", "CR-37", "R-37", "DRAIN", "SEWER"],
+    "Electrical Contractor": ["ELECTRI", "C-11", "CR-11", "R-11"],
+    "HVAC Contractor": ["HVAC", "AIR CONDITIONING", "REFRIGERATION", "C-39", "CR-39", "R-39"],
+    "General Contractor": ["GENERAL", "BUILDING", "COMMERCIAL", "RESIDENTIAL", "B-1", "B-2", "KB-1", "KB-2", "B-3", "B-4"],
+    "Roofing Contractor": ["ROOF", "C-42", "CR-42", "R-42"],
+    "Solar Contractor": ["SOLAR", "C-37R", "CR-37R", "R-37R"],
+    "A-4 Drilling": ["DRILL", "WELL", "A-4", "C-53", "CR-53", "R-53"],
+    "Well Drilling Contractor": ["DRILL", "WELL", "A-4", "C-53", "CR-53", "R-53"],
+}
+
 def clean_person_name(raw_name: str) -> str:
     if not raw_name:
         return ""
@@ -73,6 +84,18 @@ def parse_apex_record(item: dict, requested_license_type: str) -> list[dict]:
                 "phone": phone,
             })
     else:
+        # Get requested trade filter keywords
+        kw_list = []
+        for tk, kws in TRADE_FILTER_KEYWORDS.items():
+            if tk.lower() in requested_license_type.lower() or requested_license_type.lower() in tk.lower():
+                kw_list = kws
+                break
+        if not kw_list:
+            clean_req = requested_license_type.replace("Contractor", "").strip().upper()
+            if clean_req:
+                kw_list = [clean_req]
+
+        matching_lics = []
         for lic in lic_data:
             lic_num = (lic.get("licenseNo") or lic.get("licenseNumber") or "").strip()
             sub_type = (lic.get("subType") or "").strip()
@@ -81,8 +104,20 @@ def parse_apex_record(item: dict, requested_license_type: str) -> list[dict]:
             lic_status = (lic.get("status") or lic.get("licenseStatus") or "").strip()
 
             full_lic_type = sub_type or f"{lic_class} {lic_desc}".strip() or requested_license_type
-            status = "Active" if lic_status.upper() == "ACTIVE" else (lic_status.capitalize() or "Active")
+            
+            # If trade keywords exist, check if this license matches the requested trade
+            if kw_list:
+                if not any(kw in full_lic_type.upper() for kw in kw_list):
+                    continue  # Skip non-matching license (e.g. Electrical or HVAC inside a Plumbing search)
 
+            matching_lics.append((lic_num, full_lic_type, lic_status))
+
+        # If trade keywords were provided and no license matched, skip this record entirely (prevents non-plumbing leaks)
+        if kw_list and not matching_lics:
+            return []
+
+        for lic_num, full_lic_type, lic_status in matching_lics:
+            status = "Active" if lic_status.upper() == "ACTIVE" else (lic_status.capitalize() or "Active")
             formatted_lic_num = lic_num if lic_num.startswith("ROC") else f"ROC {lic_num}" if lic_num else ""
 
             results.append({

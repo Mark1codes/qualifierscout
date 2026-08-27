@@ -43,6 +43,42 @@ AZ_TRADE_MAP = {
 }
 
 
+TRADE_FILTER_KEYWORDS = {
+    "Plumbing Contractor": ["PLUMBING", "C-37", "CR-37", "R-37", "DRAIN", "SEWER"],
+    "Electrical Contractor": ["ELECTRI", "C-11", "CR-11", "R-11"],
+    "HVAC Contractor": ["HVAC", "AIR CONDITIONING", "REFRIGERATION", "C-39", "CR-39", "R-39"],
+    "General Contractor": ["GENERAL", "BUILDING", "COMMERCIAL", "RESIDENTIAL", "B-1", "B-2", "KB-1", "KB-2", "B-3", "B-4"],
+    "Roofing Contractor": ["ROOF", "C-42", "CR-42", "R-42"],
+    "Solar Contractor": ["SOLAR", "C-37R", "CR-37R", "R-37R"],
+    "A-4 Drilling": ["DRILL", "WELL", "A-4", "C-53", "CR-53", "R-53"],
+    "Well Drilling Contractor": ["DRILL", "WELL", "A-4", "C-53", "CR-53", "R-53"],
+}
+
+
+def filter_records_by_requested_trade(records: list[dict], requested_trade: str) -> list[dict]:
+    keywords = None
+    for trade_key, kw_list in TRADE_FILTER_KEYWORDS.items():
+        if trade_key.lower() in requested_trade.lower() or requested_trade.lower() in trade_key.lower():
+            keywords = kw_list
+            break
+            
+    if not keywords:
+        req_clean = requested_trade.replace("Contractor", "").strip().upper()
+        if req_clean:
+            keywords = [req_clean]
+            
+    if not keywords:
+        return records
+
+    filtered = []
+    for r in records:
+        lic_type = (r.get("license_type") or "").upper()
+        if any(kw in lic_type for kw in keywords):
+            filtered.append(r)
+            
+    return filtered
+
+
 class ArizonaScraper:
     """Scraper implementation for Arizona Registrar of Contractors (AZ ROC)."""
 
@@ -60,12 +96,11 @@ class ArizonaScraper:
         if not records:
             log("AZ ROC search returned zero records or timed out.", "warning")
 
-        # If user explicitly requested A-4 Drilling, strictly filter for A-4 license classification
-        if "A-4" in request.license_type:
-            a4_only = [r for r in records if "A-4" in r.get("license_type", "").upper() or "DRILLING" in r.get("license_type", "").upper()]
-            log(f"Filtered {len(a4_only)} strict Drilling license records from {len(records)} raw results.")
-            if a4_only:
-                records = a4_only
+        # Strictly filter records by requested trade type to avoid non-trade licenses (e.g. Electrical/HVAC inside Plumbing)
+        trade_filtered = filter_records_by_requested_trade(records, request.license_type)
+        if len(trade_filtered) < len(records):
+            log(f"Trade Filter: Retained {len(trade_filtered)} strict {request.license_type} records, filtered out {len(records) - len(trade_filtered)} non-matching trade licenses.")
+            records = trade_filtered
 
         records = records[: request.max_records]
         raw_path = self.raw_dir / f"run_{run_id}_arizona_raw.json"
