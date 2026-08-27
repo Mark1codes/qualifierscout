@@ -102,6 +102,14 @@ class ArizonaScraper:
             log(f"Trade Filter: Retained {len(trade_filtered)} strict {request.license_type} records, filtered out {len(records) - len(trade_filtered)} non-matching trade licenses.")
             records = trade_filtered
 
+        # Filter by requested city if user specified a specific city
+        if request.city and request.city.strip():
+            target_city = request.city.strip().upper()
+            city_filtered = [r for r in records if target_city in (r.get("city") or "").upper()]
+            if city_filtered:
+                log(f"City Filter: Retained {len(city_filtered)} records specifically located in '{request.city}' out of {len(records)} state-wide records.")
+                records = city_filtered
+
         records = records[: request.max_records]
         raw_path = self.raw_dir / f"run_{run_id}_arizona_raw.json"
         raw_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
