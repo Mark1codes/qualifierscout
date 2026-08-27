@@ -34,6 +34,7 @@ async def verify_emails_with_zerobounce(
 
     valid_count = 0
     invalid_count = 0
+    zb_credits_used = 0
     cache: Dict[str, Dict[str, Any]] = {}
 
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -64,6 +65,7 @@ async def verify_emails_with_zerobounce(
                     "email": email,
                 }
                 response = await client.get(ZEROBOUNCE_API_URL, params=params)
+                zb_credits_used += 1
 
                 if response.status_code == 200:
                     data = response.json()
@@ -74,33 +76,33 @@ async def verify_emails_with_zerobounce(
                     if status == "valid":
                         record["verification_status"] = "Verified"
                         valid_count += 1
-                        log(f"ZeroBounce: Email '{email}' is VALID (Deliverable).", "info")
+                        log(f"[ZEROBOUNCE CREDIT LOG] Email '{email}' is VALID (1 ZeroBounce Credit Used). Total run ZeroBounce credits: {zb_credits_used}", "info")
 
                     elif status in ("invalid", "spamtrap", "abuse", "do_not_mail"):
                         record["verification_status"] = "Invalid"
                         record["email"] = ""  # Clear invalid email to prevent bounces
                         invalid_count += 1
                         log(
-                            f"ZeroBounce: Email '{email}' is {status.upper()} ({sub_status}). Stripped email to prevent bounces.",
+                            f"[ZEROBOUNCE CREDIT LOG] Email '{email}' is {status.upper()} ({sub_status}) (1 ZeroBounce Credit Used). Stripped email to prevent bounces. Total run ZeroBounce credits: {zb_credits_used}",
                             "warning"
                         )
 
                     elif status in ("catch-all", "catch_all", "unknown"):
                         record["verification_status"] = "Catch-All"
                         log(
-                            f"ZeroBounce: Email '{email}' status is {status.upper()}. Marked as Catch-All.",
+                            f"[ZEROBOUNCE CREDIT LOG] Email '{email}' status is {status.upper()} (1 ZeroBounce Credit Used). Marked as Catch-All. Total run ZeroBounce credits: {zb_credits_used}",
                             "info"
                         )
 
                     else:
                         record["verification_status"] = status.capitalize() or "Unverified"
-                        log(f"ZeroBounce: Email '{email}' return status '{status}'.", "info")
+                        log(f"[ZEROBOUNCE CREDIT LOG] Email '{email}' returned '{status}' (1 ZeroBounce Credit Used). Total run ZeroBounce credits: {zb_credits_used}", "info")
 
                 else:
-                    log(f"ZeroBounce API returned status {response.status_code} for '{email}'.", "warning")
+                    log(f"[ZEROBOUNCE ERROR] API returned status {response.status_code} for '{email}'.", "warning")
 
             except Exception as exc:
-                log(f"ZeroBounce verification error for '{email}': {exc}", "warning")
+                log(f"[ZEROBOUNCE ERROR] Verification error for '{email}': {exc}", "warning")
 
-    log(f"ZeroBounce verification completed: {valid_count} Valid, {invalid_count} Invalid/Stripped.")
+    log(f"[CREDIT SUMMARY] ZeroBounce verification completed: Used {zb_credits_used} ZeroBounce Credits for this run ({valid_count} Valid, {invalid_count} Invalid/Stripped).")
     return records

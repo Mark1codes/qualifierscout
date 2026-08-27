@@ -402,13 +402,12 @@ def export_leads(request: ExportRequest) -> FileResponse:
     if request.individuals_only:
         df = df[df["First Name"].str.strip() != ""]
     
-    # Deduplicate export by company_name and person name so each contractor appears exactly once
-    if "company_name" in df.columns and "First Name" in df.columns and "Last Name" in df.columns:
-        # Create a normalized deduplication key combining company name and person name
-        dedup_series = df["company_name"].astype(str).str.upper().str.strip() + "_" + df["First Name"].astype(str).str.upper().str.strip() + "_" + df["Last Name"].astype(str).str.upper().str.strip()
-        df = df.loc[~dedup_series.duplicated(keep="first")].copy()
-    elif "license_number" in df.columns:
-        df.drop_duplicates(subset=["license_number"], inplace=True)
+    # Deduplication temporarily disabled for raw file export:
+    # if "company_name" in df.columns and "First Name" in df.columns and "Last Name" in df.columns:
+    #     dedup_series = df["company_name"].astype(str).str.upper().str.strip() + "_" + df["First Name"].astype(str).str.upper().str.strip() + "_" + df["Last Name"].astype(str).str.upper().str.strip()
+    #     df = df.loc[~dedup_series.duplicated(keep="first")].copy()
+    # elif "license_number" in df.columns:
+    #     df.drop_duplicates(subset=["license_number"], inplace=True)
 
     # Format company name to Title Case to prevent ALL CAPS
     df["company_name"] = df["company_name"].apply(lambda x: str(x).title() if pd.notna(x) else x)
@@ -605,4 +604,21 @@ def get_stats(conn: sqlite3.Connection) -> dict:
         FROM leads
         """
     ).fetchone()
-    return {key: row[key] or 0 for key in row.keys()}
+
+    apollo_requests = conn.execute(
+        "SELECT COUNT(*) FROM scrape_logs WHERE message LIKE '%Searching Apollo database%'"
+    ).fetchone()[0] or 0
+
+    apollo_credits = conn.execute(
+        "SELECT COUNT(*) FROM scrape_logs WHERE message LIKE '%Apollo found Verified email%' OR message LIKE '%Apollo CONSUMED 1 CREDIT%' OR message LIKE '%1 Apollo Credit Used%'"
+    ).fetchone()[0] or 0
+
+    zerobounce_credits = conn.execute(
+        "SELECT COUNT(*) FROM scrape_logs WHERE message LIKE '%ZeroBounce: Email%' OR message LIKE '%1 ZeroBounce Credit Used%'"
+    ).fetchone()[0] or 0
+
+    res = {key: row[key] or 0 for key in row.keys()}
+    res["apollo_requests_total"] = apollo_requests
+    res["apollo_credits_total"] = apollo_credits
+    res["zerobounce_credits_total"] = zerobounce_credits
+    return res

@@ -9,6 +9,7 @@ async def enrich_with_apollo(records: List[Dict[str, Any]], log) -> List[Dict[st
         return records
 
     url = "https://api.apollo.io/api/v1/people/match"
+    apollo_credits_used = 0
     
     async with httpx.AsyncClient(timeout=30) as client:
         for record in records:
@@ -16,9 +17,6 @@ async def enrich_with_apollo(records: List[Dict[str, Any]], log) -> List[Dict[st
             if not name:
                 continue
                 
-            # If we already have an email from a previous step, we can skip or overwrite
-            # Since Apollo is premium, we definitely want its data.
-            
             parts = name.split(" ")
             first_name = parts[0]
             last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
@@ -26,12 +24,10 @@ async def enrich_with_apollo(records: List[Dict[str, Any]], log) -> List[Dict[st
             if record.get("state") == "NM" and len(parts) > 1:
                 first_name, last_name = last_name, first_name
             
-            # Ultra-Credit Protection: If it's NM and we have NO linkedin and NO company, 
-            # Apollo will 100% fail. Skip it to save credits.
             has_linkedin = bool(record.get("linkedin"))
             has_company = bool(record.get("company_name"))
             if record.get("state") == "NM" and not has_linkedin and not has_company:
-                log(f"Skipping Apollo for {name} (No LinkedIn/Company found). Saves 1 credit.")
+                log(f"[APOLLO CREDIT LOG] Skipping Apollo for {name} (No LinkedIn/Company found). Saves 1 credit.")
                 continue
                 
             payload = {
@@ -50,7 +46,7 @@ async def enrich_with_apollo(records: List[Dict[str, Any]], log) -> List[Dict[st
             }
             
             try:
-                log(f"Searching Apollo database for: {name}...")
+                log(f"[APOLLO LOG] Searching Apollo database for: {name}...")
                 response = await client.post(url, json=payload, headers=headers)
                 
                 if response.status_code == 200:
@@ -65,9 +61,10 @@ async def enrich_with_apollo(records: List[Dict[str, Any]], log) -> List[Dict[st
                         if email:
                             if email_status == "verified" or email_status == "extrapolated":
                                 record["email"] = email
-                                log(f"Apollo found Verified email: {email}")
+                                apollo_credits_used += 1
+                                log(f"[APOLLO CREDIT LOG] Unlocked verified email for '{name}': {email} (1 Apollo Credit Used). Total run Apollo credits: {apollo_credits_used}")
                             else:
-                                log(f"Apollo found email '{email}' but status was '{email_status}'. Ignoring to prevent bounces.")
+                                log(f"[APOLLO LOG] Apollo found email '{email}' but status was '{email_status}'. Ignoring to prevent bounces.")
                                 
                         # Extract Phone
                         phone = person.get("phone_numbers", [])
@@ -115,20 +112,21 @@ async def enrich_with_apollo(records: List[Dict[str, Any]], log) -> List[Dict[st
                         
                         current_company = record.get("company_name", "").lower()
                         if current_company and any(kw in current_company for kw in bad_company_keywords):
-                            log(f"Apollo found blacklisted company '{record.get('company_name')}'. Tagging lead for removal.")
+                            log(f"[APOLLO LOG] Apollo found blacklisted company '{record.get('company_name')}'. Tagging lead for removal.")
                             record["_drop_lead"] = True
                             
                     else:
-                        log(f"Apollo found no match for {name}.")
+                        log(f"[APOLLO LOG] Apollo found no match for {name}.")
                 else:
-                    log(f"Apollo API Error {response.status_code}: {response.text}", "error")
+                    log(f"[APOLLO ERROR] Apollo API Error {response.status_code}: {response.text}", "error")
             except Exception as e:
-                log(f"Apollo Request Failed: {e}", "error")
+                log(f"[APOLLO ERROR] Apollo Request Failed: {e}", "error")
                 
     # Filter out the leads we tagged for removal
     valid_records = [r for r in records if not r.get("_drop_lead")]
     dropped_count = len(records) - len(valid_records)
     if dropped_count > 0:
-        log(f"Apollo Enrichment dropped {dropped_count} leads due to blacklisted company names.")
+        log(f"[APOLLO LOG] Apollo Enrichment dropped {dropped_count} leads due to blacklisted company names.")
         
+    log(f"[CREDIT SUMMARY] Apollo Enrichment Finished: Used {apollo_credits_used} Apollo Credits for this run.")
     return valid_records

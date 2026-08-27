@@ -787,6 +787,37 @@ export function App() {
                 </div>
               </div>
 
+              <div className="panel" style={{ marginTop: '24px' }}>
+                <PanelTitle title="API Credit Usage & Tracking" />
+                <p className="panel-desc" style={{ color: '#94A3B8', fontSize: '0.85rem', marginBottom: '16px' }}>Real-time breakdown of API credit consumption for Apollo.io and ZeroBounce.</p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                  <div style={{ background: '#0F172A', border: '1px solid #1E293B', padding: '16px', borderRadius: '8px' }}>
+                    <small style={{ color: '#94A3B8', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>APOLLO CREDITS USED</small>
+                    <strong style={{ display: 'block', fontSize: '1.6rem', color: '#06D1D4', marginTop: '6px' }}>
+                      {stats.apollo_credits_total ?? 0}
+                    </strong>
+                    <span style={{ fontSize: '0.75rem', color: '#64748B' }}>Verified contacts unlocked</span>
+                  </div>
+
+                  <div style={{ background: '#0F172A', border: '1px solid #1E293B', padding: '16px', borderRadius: '8px' }}>
+                    <small style={{ color: '#94A3B8', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>ZEROBOUNCE CREDITS USED</small>
+                    <strong style={{ display: 'block', fontSize: '1.6rem', color: '#10B981', marginTop: '6px' }}>
+                      {stats.zerobounce_credits_total ?? 0}
+                    </strong>
+                    <span style={{ fontSize: '0.75rem', color: '#64748B' }}>Emails verified for deliverability</span>
+                  </div>
+
+                  <div style={{ background: '#0F172A', border: '1px solid #1E293B', padding: '16px', borderRadius: '8px' }}>
+                    <small style={{ color: '#94A3B8', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>APOLLO SEARCH REQUESTS</small>
+                    <strong style={{ display: 'block', fontSize: '1.6rem', color: '#3B82F6', marginTop: '6px' }}>
+                      {stats.apollo_requests_total ?? 0}
+                    </strong>
+                    <span style={{ fontSize: '0.75rem', color: '#64748B' }}>Total search queries sent</span>
+                  </div>
+                </div>
+              </div>
+
             </section>
           )}
 

@@ -31,6 +31,9 @@ export interface LeadStats {
   verified: number;
   needs_review: number;
   not_verified: number;
+  apollo_requests_total?: number;
+  apollo_credits_total?: number;
+  zerobounce_credits_total?: number;
 }
 
 export interface LeadsResponse {
