@@ -180,7 +180,7 @@ class TexasScraper:
                 seen_licenses = set()
 
                 page = 1
-                max_pages = max(10, (request.max_records // 20) + 2)
+                max_pages = max(500, request.max_records * 5)
 
                 while soup and len(records) < request.max_records and page <= max_pages:
                     new_records = self._parse_results_page(soup, city, request.license_type, seen_licenses, log)
