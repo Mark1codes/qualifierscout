@@ -189,6 +189,10 @@ class TexasScraper:
                     if len(records) >= request.max_records:
                         break
 
+                    if page % 5 == 0:
+                        log(f"Fetched page {page} from TDLR... Accumulated {len(records)} filtered business leads so far.")
+                        await asyncio.sleep(0.05)
+
                     # Check for Next page link
                     next_link = soup.find("a", string=lambda s: s and "Next" in s)
                     if not next_link:
