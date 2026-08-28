@@ -376,7 +376,10 @@ class TexasScraper:
                 first = (row.get("FIRST_NAME") or "").strip().title()
                 last = (row.get("LAST_NAME") or "").strip().title()
                 full_name = f"{first} {last}".strip()
-                company = (row.get("PLUMB_COMPANY") or "").strip().title() or full_name
+                
+                company = (row.get("PLUMB_COMPANY") or "").strip().title()
+                if company and (company.lower() == full_name.lower() or company.upper() in ["NONE", "N/A", "NA", "SELF", "N A"]):
+                    company = ""
 
                 raw_status = (row.get("LIC_STATUS") or "").strip()
                 status = "Active" if raw_status == "Current" else (raw_status.capitalize() or "Active")
