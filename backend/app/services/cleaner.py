@@ -51,8 +51,12 @@ def clean_record(record: dict) -> dict:
     cleaned["phone"] = normalize_phone(cleaned.get("phone"))
     
     # Clean bad company names that ruin cold email personalization
-    company_name = (cleaned.get("company_name") or "").strip().lower()
-    if company_name in ["self employed", "self-employed", "freelance", "freelancer", "independent contractor"]:
+    company_name = (cleaned.get("company_name") or "").strip()
+    contractor_name = (cleaned.get("contractor_name") or "").strip()
+    
+    if company_name.lower() in ["self employed", "self-employed", "freelance", "freelancer", "independent contractor"]:
+        cleaned["company_name"] = ""
+    elif company_name and contractor_name and company_name.lower() == contractor_name.lower():
         cleaned["company_name"] = ""
 
     cleaned["duplicate_key"] = duplicate_key(cleaned)

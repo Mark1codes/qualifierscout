@@ -34,7 +34,10 @@ CORPORATE_KEYWORDS = {
     "ENTERPRISES", "GROUP", "SYSTEMS", "HOLDINGS", "COMPANY", "PARTNERS",
     "BUILDERS", "CONSTRUCTION", "TECHNOLOGIES", "PLUMBING", "AIR", "COOLING",
     "HEATING", "POOL", "POOLS", "REPAIR", "INSPECTOR", "DEPOT", "CONTRACTOR",
-    "CONTRACTORS", "DBA", "BROS", "BROTHERS", "SUPPLY", "TEXAS", "LONE STAR"
+    "CONTRACTORS", "DBA", "BROS", "BROTHERS", "SUPPLY", "TEXAS", "LONE STAR",
+    "MECHANICAL", "HOT TUB", "AQUATECH", "REFRIGERATION", "ROOFING", "SOLAR",
+    "MASONRY", "CONCRETE", "FENCING", "UTILITY", "DRILLING", "WELL", "WATER",
+    "DEVELOPMENT", "PROPERTIES", "PAVING", "ENGINEERING", "REMODELING"
 }
 
 
@@ -49,7 +52,7 @@ def parse_tdlr_name(name_raw: str) -> tuple[str, str]:
     """
     Parses TDLR raw name string into (contractor_name, company_name).
     contractor_name: Individual Person (First Last)
-    company_name: Business Entity
+    company_name: Business Entity (Empty string if individual practitioner)
     """
     if not name_raw:
         return "", ""
@@ -96,16 +99,18 @@ def parse_tdlr_name(name_raw: str) -> tuple[str, str]:
                 p_parts = [p.strip() for p in name_raw.split(",") if p.strip()]
                 if len(p_parts) == 2:
                     contractor_name = f"{p_parts[1]} {p_parts[0]}".title()
-                    company_name = contractor_name
                 else:
                     contractor_name = name_raw.title()
-                    company_name = contractor_name
             else:
                 contractor_name = name_raw.title()
-                company_name = contractor_name
+            # Individual practitioner: leave company_name empty!
+            company_name = ""
 
-    if company_name and company_name.upper().strip() in {"NONE", "N/A", "NA", "SAME AS ABOVE", "SELF", "N A"}:
-        company_name = contractor_name
+    if company_name and (
+        company_name.upper().strip() in {"NONE", "N/A", "NA", "SAME AS ABOVE", "SELF", "N A"}
+        or company_name.strip().lower() == contractor_name.strip().lower()
+    ):
+        company_name = ""
 
     return contractor_name, company_name
 
@@ -283,7 +288,7 @@ class TexasScraper:
             records.append({
                 "source_url": BASE_URL,
                 "contractor_name": contractor_name,
-                "company_name": company_name or contractor_name or name_raw,
+                "company_name": company_name if company_name and company_name.lower().strip() != contractor_name.lower().strip() else "",
                 "license_number": lic_num,
                 "license_type": license_type,
                 "license_status": status,

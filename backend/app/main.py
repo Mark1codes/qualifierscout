@@ -409,8 +409,20 @@ def export_leads(request: ExportRequest) -> FileResponse:
     # elif "license_number" in df.columns:
     #     df.drop_duplicates(subset=["license_number"], inplace=True)
 
-    # Format company name to Title Case to prevent ALL CAPS
-    df["company_name"] = df["company_name"].apply(lambda x: str(x).title() if pd.notna(x) else x)
+    # Format company name to Title Case and clear if it matches First Name + Last Name
+    def clean_export_company(row):
+        comp = str(row.get("company_name") or "").strip()
+        fname = str(row.get("First Name") or "").strip()
+        lname = str(row.get("Last Name") or "").strip()
+        fullname = f"{fname} {lname}".strip()
+        
+        if not comp or comp.upper() in ["NONE", "N/A", "NA", "NAN"]:
+            return ""
+        if fullname and (comp.lower() == fullname.lower() or comp.lower() == fname.lower() or comp.lower() == lname.lower()):
+            return ""
+        return comp.title()
+
+    df["company_name"] = df.apply(clean_export_company, axis=1)
     
     # Map headers to exact requested format
     header_mapping = {
