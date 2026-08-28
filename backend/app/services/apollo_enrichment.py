@@ -48,11 +48,12 @@ async def enrich_with_apollo(records: List[Dict[str, Any]], log) -> List[Dict[st
             try:
                 log(f"[APOLLO LOG] Searching Apollo database for: {name}...")
                 from app.db.database import log_api_credit
+                from app.services.network_guard import safe_http_request
                 log_api_credit("apollo_search", 1, details=f"Apollo search query for {name}")
 
-                response = await client.post(url, json=payload, headers=headers)
+                response = await safe_http_request(client, "POST", url, log=log, json=payload, headers=headers)
                 
-                if response.status_code == 200:
+                if response and response.status_code == 200:
                     data = response.json()
                     person = data.get("person", {})
                     

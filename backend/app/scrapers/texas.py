@@ -9,6 +9,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.schemas import ScrapeStartRequest
+from app.services.network_guard import safe_http_request
 
 BASE_URL = "https://www.tdlr.texas.gov/LicenseSearch/"
 SEARCH_URL = BASE_URL + "LicenseSearch.asp"
@@ -173,7 +174,9 @@ class TexasScraper:
                 location_label = city if city else "Statewide (All Cities)"
                 log(f"Searching Texas TDLR for {tdlr_type} contractors in {location_label}...")
 
-                r2 = await client.post(full_url, data=payload)
+                r2 = await safe_http_request(client, "POST", full_url, log=log, data=payload)
+                if not r2:
+                    return []
                 soup = BeautifulSoup(r2.content, "html.parser")
 
                 records = []
@@ -200,7 +203,9 @@ class TexasScraper:
 
                     href = next_link.get("href")
                     next_url = "https://www.tdlr.texas.gov/LicenseSearch/" + href
-                    r_next = await client.get(next_url)
+                    r_next = await safe_http_request(client, "GET", next_url, log=log)
+                    if not r_next:
+                        break
                     soup = BeautifulSoup(r_next.content, "html.parser")
                     page += 1
 
@@ -208,22 +213,25 @@ class TexasScraper:
                 if not records and city:
                     log(f"No results for {city}. Trying statewide search...", "warning")
                     payload["phy_city"] = ""
-                    r3 = await client.post(full_url, data=payload)
-                    soup = BeautifulSoup(r3.content, "html.parser")
-                    page = 1
-                    while soup and len(records) < request.max_records and page <= max_pages:
-                        new_records = self._parse_results_page(soup, "", request.license_type, seen_licenses, log)
-                        records.extend(new_records)
-                        if len(records) >= request.max_records:
-                            break
-                        next_link = soup.find("a", string=lambda s: s and "Next" in s)
-                        if not next_link:
-                            break
-                        href = next_link.get("href")
-                        next_url = "https://www.tdlr.texas.gov/LicenseSearch/" + href
-                        r_next = await client.get(next_url)
-                        soup = BeautifulSoup(r_next.content, "html.parser")
-                        page += 1
+                    r3 = await safe_http_request(client, "POST", full_url, log=log, data=payload)
+                    if r3:
+                        soup = BeautifulSoup(r3.content, "html.parser")
+                        page = 1
+                        while soup and len(records) < request.max_records and page <= max_pages:
+                            new_records = self._parse_results_page(soup, "", request.license_type, seen_licenses, log)
+                            records.extend(new_records)
+                            if len(records) >= request.max_records:
+                                break
+                            next_link = soup.find("a", string=lambda s: s and "Next" in s)
+                            if not next_link:
+                                break
+                            href = next_link.get("href")
+                            next_url = "https://www.tdlr.texas.gov/LicenseSearch/" + href
+                            r_next = await safe_http_request(client, "GET", next_url, log=log)
+                            if not r_next:
+                                break
+                            soup = BeautifulSoup(r_next.content, "html.parser")
+                            page += 1
 
                 log(f"Found {len(records)} records in Texas.")
                 return records
