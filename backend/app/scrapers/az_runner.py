@@ -21,6 +21,9 @@ TRADE_FILTER_KEYWORDS = {
     "Roofing Contractor": ["ROOF", "C-42", "CR-42", "R-42"],
     "Solar Contractor": ["SOLAR", "C-37R", "CR-37R", "R-37R"],
     "A-4 Drilling": ["DRILL", "WELL", "A-4", "C-53", "CR-53", "R-53"],
+    "CR-53 Water Well Drilling": ["CR-53", "C-53", "R-53", "WELL", "DRILL"],
+    "C-53 Water Well Drilling": ["C-53", "CR-53", "WELL", "DRILL"],
+    "R-53 Drilling": ["R-53", "CR-53", "DRILL", "WELL"],
     "Well Drilling Contractor": ["DRILL", "WELL", "A-4", "C-53", "CR-53", "R-53"],
 }
 

@@ -135,6 +135,9 @@ const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
   ],
   Arizona: [
     "A-4 Drilling",
+    "CR-53 Water Well Drilling",
+    "C-53 Water Well Drilling",
+    "R-53 Drilling",
     "Well Drilling Contractor",
     "General Contractor",
     "Electrical Contractor",
