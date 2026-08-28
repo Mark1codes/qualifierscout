@@ -273,6 +273,12 @@ class TexasScraper:
                 continue
             seen_licenses.add(lic_num)
 
+            # Filter out individual worker/apprentice licenses when searching for Electrical Contractors
+            if "electrical" in license_type.lower():
+                lic_prefix = lic_num.split("-")[0].strip().upper()
+                if lic_prefix in ["AE", "RAI"]:
+                    continue
+
             exp_date = ""
             status = "Active"
             exp_match = re.search(r"(\d{2}/\d{2}/\d{4})", exp_date_raw)
