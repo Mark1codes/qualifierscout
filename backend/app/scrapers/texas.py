@@ -3,9 +3,7 @@ import csv
 import json
 import re
 import sys
-import subprocess
 from pathlib import Path
-from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -17,7 +15,7 @@ SEARCH_URL = BASE_URL + "LicenseSearch.asp"
 RESULTS_URL = BASE_URL + "SearchResultsListBrowse.asp"
 
 # Texas Licensing Mapping
-# TDLR: HVAC (AIRREF), Electrical (ELCTRC), Elevator (ELEVTR), Mold (MOLD), Water Well (WWDRLL)
+# TDLR: HVAC (AIRREF), Electrical (ELCTRC), Elevator (ELEVTR), Mold (MRCOMP), Water Well (WWDPMP)
 # TSBPE: Plumbing Contractor (RMP - Responsible Master Plumber)
 TX_LICENSE_TYPE_MAP = {
     "Plumbing Contractor": "PLUMBING",
@@ -25,10 +23,91 @@ TX_LICENSE_TYPE_MAP = {
     "HVAC Contractor": "AIRREF",
     "Electrical Contractor": "ELCTRC",
     "Elevator Contractor": "ELEVTR",
-    "Mold Remediation Contractor": "MOLD",
-    "Water Well Driller": "WWDRLL",
+    "Mold Remediation Contractor": "MRCOMP",
+    "Water Well Driller": "WWDPMP",
     "default": "AIRREF",
 }
+
+CORPORATE_KEYWORDS = {
+    "INC", "LLC", "L.L.C.", "CO", "CORP", "CORPORATION", "LIMITED", "LTD",
+    "L.P.", "LP", "SERVICES", "SERVICE", "ELECTRIC", "ELECTRICAL", "SOLUTIONS",
+    "ENTERPRISES", "GROUP", "SYSTEMS", "HOLDINGS", "COMPANY", "PARTNERS",
+    "BUILDERS", "CONSTRUCTION", "TECHNOLOGIES", "PLUMBING", "AIR", "COOLING",
+    "HEATING", "POOL", "POOLS", "REPAIR", "INSPECTOR", "DEPOT", "CONTRACTOR",
+    "CONTRACTORS", "DBA", "BROS", "BROTHERS", "SUPPLY", "TEXAS", "LONE STAR"
+}
+
+
+def is_corporate(name: str) -> bool:
+    """Check if string contains corporate entity keywords."""
+    clean = re.sub(r"[^\w\s]", " ", name.upper())
+    words = clean.split()
+    return any(w in CORPORATE_KEYWORDS for w in words)
+
+
+def parse_tdlr_name(name_raw: str) -> tuple[str, str]:
+    """
+    Parses TDLR raw name string into (contractor_name, company_name).
+    contractor_name: Individual Person (First Last)
+    company_name: Business Entity
+    """
+    if not name_raw:
+        return "", ""
+
+    name_raw = name_raw.strip()
+    contractor_name = ""
+    company_name = ""
+
+    # Check for parentheses: Outside (Inside)
+    paren_match = re.match(r"^(.*?)\s*\((.+)\)\s*$", name_raw)
+    if paren_match:
+        part1 = paren_match.group(1).strip()
+        part2 = paren_match.group(2).strip()
+
+        if is_corporate(part1) and not is_corporate(part2):
+            company_name = part1
+            person_part = part2
+        elif is_corporate(part2) and not is_corporate(part1):
+            company_name = part2
+            person_part = part1
+        elif is_corporate(part1) and is_corporate(part2):
+            company_name = part1
+            person_part = part2
+        else:
+            person_part = part1
+            company_name = part2
+
+        if person_part:
+            if "," in person_part and not is_corporate(person_part):
+                p_parts = [p.strip() for p in person_part.split(",") if p.strip()]
+                if len(p_parts) == 2:
+                    contractor_name = f"{p_parts[1]} {p_parts[0]}".title()
+                else:
+                    contractor_name = person_part.title()
+            else:
+                contractor_name = person_part.title()
+
+    else:
+        if is_corporate(name_raw):
+            company_name = name_raw
+            contractor_name = ""
+        else:
+            if "," in name_raw:
+                p_parts = [p.strip() for p in name_raw.split(",") if p.strip()]
+                if len(p_parts) == 2:
+                    contractor_name = f"{p_parts[1]} {p_parts[0]}".title()
+                    company_name = contractor_name
+                else:
+                    contractor_name = name_raw.title()
+                    company_name = contractor_name
+            else:
+                contractor_name = name_raw.title()
+                company_name = contractor_name
+
+    if company_name and company_name.upper().strip() in {"NONE", "N/A", "NA", "SAME AS ABOVE", "SELF", "N A"}:
+        company_name = contractor_name
+
+    return contractor_name, company_name
 
 
 class TexasScraper:
@@ -68,11 +147,11 @@ class TexasScraper:
     async def _try_public_search(self, request: ScrapeStartRequest, log) -> list[dict]:
         try:
             tdlr_type = TX_LICENSE_TYPE_MAP.get(request.license_type, TX_LICENSE_TYPE_MAP["default"])
-            city = (request.city or "Houston").upper().strip()
+            city = (request.city or "").upper().strip()
+            city_padded = city.ljust(20) if city else ""
 
             async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
                 full_url = "https://www.tdlr.texas.gov/LicenseSearch/SearchResultsListBrowse.asp?from=search"
-                city_padded = city.ljust(20)
 
                 payload = {
                     "pht_lic": "",
@@ -86,18 +165,56 @@ class TexasScraper:
                     "phy_cnty": "-1",
                 }
 
-                log(f"Searching Texas TDLR for {tdlr_type} contractors in {city}...")
+                location_label = city if city else "Statewide (All Cities)"
+                log(f"Searching Texas TDLR for {tdlr_type} contractors in {location_label}...")
+
                 r2 = await client.post(full_url, data=payload)
-                soup2 = BeautifulSoup(r2.content, "html.parser")
+                soup = BeautifulSoup(r2.content, "html.parser")
 
-                records = self._parse_results(soup2, city, request.license_type, log)
+                records = []
+                seen_licenses = set()
 
-                if not records:
+                page = 1
+                max_pages = max(10, (request.max_records // 20) + 2)
+
+                while soup and len(records) < request.max_records and page <= max_pages:
+                    new_records = self._parse_results_page(soup, city, request.license_type, seen_licenses, log)
+                    records.extend(new_records)
+
+                    if len(records) >= request.max_records:
+                        break
+
+                    # Check for Next page link
+                    next_link = soup.find("a", string=lambda s: s and "Next" in s)
+                    if not next_link:
+                        break
+
+                    href = next_link.get("href")
+                    next_url = "https://www.tdlr.texas.gov/LicenseSearch/" + href
+                    r_next = await client.get(next_url)
+                    soup = BeautifulSoup(r_next.content, "html.parser")
+                    page += 1
+
+                # If city search yielded 0 records and user had specified a city, try statewide fallback
+                if not records and city:
                     log(f"No results for {city}. Trying statewide search...", "warning")
                     payload["phy_city"] = ""
                     r3 = await client.post(full_url, data=payload)
-                    soup3 = BeautifulSoup(r3.content, "html.parser")
-                    records = self._parse_results(soup3, "", request.license_type, log)
+                    soup = BeautifulSoup(r3.content, "html.parser")
+                    page = 1
+                    while soup and len(records) < request.max_records and page <= max_pages:
+                        new_records = self._parse_results_page(soup, "", request.license_type, seen_licenses, log)
+                        records.extend(new_records)
+                        if len(records) >= request.max_records:
+                            break
+                        next_link = soup.find("a", string=lambda s: s and "Next" in s)
+                        if not next_link:
+                            break
+                        href = next_link.get("href")
+                        next_url = "https://www.tdlr.texas.gov/LicenseSearch/" + href
+                        r_next = await client.get(next_url)
+                        soup = BeautifulSoup(r_next.content, "html.parser")
+                        page += 1
 
                 log(f"Found {len(records)} records in Texas.")
                 return records
@@ -106,75 +223,76 @@ class TexasScraper:
             log(f"Texas TDLR scrape failed: {exc}", "error")
             return []
 
-    def _parse_results(self, soup: BeautifulSoup, city: str, license_type: str, log) -> list[dict]:
-        """Parse HTML result tables into structured contractor lead objects."""
+    def _parse_results_page(
+        self,
+        soup: BeautifulSoup,
+        city: str,
+        license_type: str,
+        seen_licenses: set[str],
+        log
+    ) -> list[dict]:
+        """Parse HTML result table for a single page into structured contractor lead objects."""
         records = []
 
-        for table in soup.find_all("table"):
-            rows = table.find_all("tr")
-            header_found = False
+        table = soup.find("table", {"cellpadding": "2"})
+        if not table:
+            return records
 
-            for row in rows:
-                cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
-                if not cells:
-                    continue
+        rows = table.find_all("tr")
+        header_found = False
 
-                if any("License" in c for c in cells):
-                    header_found = True
-                    continue
+        for row in rows:
+            cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
+            if not cells:
+                continue
 
-                if not header_found or len(cells) < 3:
-                    continue
+            if any("License" in c for c in cells):
+                header_found = True
+                continue
 
-                lic_num = cells[0].strip()
-                exp_date_raw = cells[1].strip() if len(cells) > 1 else ""
-                name_raw = cells[2].strip() if len(cells) > 2 else ""
-                row_city = cells[3].strip() if len(cells) > 3 else city
-                row_zip = cells[4].strip() if len(cells) > 4 else ""
-                phone = cells[6].strip() if len(cells) > 6 else ""
+            if not header_found or len(cells) < 3:
+                continue
 
-                if not lic_num or not name_raw or not re.search(r"[A-Za-z]+.*?\d+", lic_num):
-                    continue
+            lic_num = cells[0].strip()
+            exp_date_raw = cells[1].strip() if len(cells) > 1 else ""
+            name_raw = cells[2].strip() if len(cells) > 2 else ""
+            row_city = cells[3].strip() if len(cells) > 3 else city
+            row_zip = cells[4].strip() if len(cells) > 4 else ""
+            phone = cells[6].strip() if len(cells) > 6 else ""
 
-                exp_date = ""
-                status = "Active"
-                exp_match = re.search(r"(\d{2}/\d{2}/\d{4})", exp_date_raw)
-                if exp_match:
-                    exp_date = exp_match.group(1)
-                    if "Expired" in exp_date_raw:
-                        status = "Expired"
-                elif "Ren process" in exp_date_raw:
-                    status = "Renewal Pending"
+            if not lic_num or not name_raw or not re.search(r"[A-Za-z]+.*?\d+", lic_num):
+                continue
 
-                contractor_name = ""
-                company_name = ""
+            # Deduplication check within current run
+            if lic_num in seen_licenses:
+                continue
+            seen_licenses.add(lic_num)
 
-                paren_match = re.match(r"^(.*?)\s*\((.+)\)\s*$", name_raw)
-                if paren_match:
-                    raw_person = paren_match.group(1).strip()
-                    company_name = paren_match.group(2).strip()
-                    parts = [p.strip() for p in raw_person.split(",") if p.strip()]
-                    contractor_name = f"{parts[1]} {parts[0]}" if len(parts) == 2 else raw_person
-                else:
-                    parts = [p.strip() for p in name_raw.split(",") if p.strip()]
-                    contractor_name = f"{parts[1]} {parts[0]}" if len(parts) == 2 else name_raw
+            exp_date = ""
+            status = "Active"
+            exp_match = re.search(r"(\d{2}/\d{2}/\d{4})", exp_date_raw)
+            if exp_match:
+                exp_date = exp_match.group(1)
+                if "Expired" in exp_date_raw:
+                    status = "Expired"
+            elif "Ren process" in exp_date_raw:
+                status = "Renewal Pending"
 
-                if company_name and company_name.upper().strip() in {"NONE", "N/A", "NA", "SAME AS ABOVE", "SELF"}:
-                    company_name = ""
+            contractor_name, company_name = parse_tdlr_name(name_raw)
 
-                records.append({
-                    "source_url":       BASE_URL,
-                    "contractor_name":  contractor_name,
-                    "company_name":     company_name or contractor_name,
-                    "license_number":   lic_num,
-                    "license_type":     license_type,
-                    "license_status":   status,
-                    "expiration_date":  exp_date,
-                    "city":             row_city.title() or city.title(),
-                    "state":            "TX",
-                    "zip_code":         row_zip,
-                    "phone":            phone,
-                })
+            records.append({
+                "source_url": BASE_URL,
+                "contractor_name": contractor_name,
+                "company_name": company_name or contractor_name or name_raw,
+                "license_number": lic_num,
+                "license_type": license_type,
+                "license_status": status,
+                "expiration_date": exp_date,
+                "city": row_city.title() or city.title(),
+                "state": "TX",
+                "zip_code": row_zip,
+                "phone": phone,
+            })
 
         return records
 
@@ -230,12 +348,19 @@ class TexasScraper:
             lines = csv_text.splitlines()
             reader = csv.DictReader(lines)
 
+            seen_licenses = set()
+
             for row in reader:
                 row_city = (row.get("CITY") or "").upper().strip()
 
                 # City filter if provided by user
                 if city_filter and city_filter not in row_city:
                     continue
+
+                lic_num = f"RMP-{row.get('LICENSE_NBR', '')}"
+                if lic_num in seen_licenses:
+                    continue
+                seen_licenses.add(lic_num)
 
                 first = (row.get("FIRST_NAME") or "").strip().title()
                 last = (row.get("LAST_NAME") or "").strip().title()
@@ -249,7 +374,7 @@ class TexasScraper:
                     "source_url": "https://tsbpe.texas.gov/download-csv/RMP/",
                     "contractor_name": full_name,
                     "company_name": company,
-                    "license_number": f"RMP-{row.get('LICENSE_NBR', '')}",
+                    "license_number": lic_num,
                     "license_type": "Plumbing Contractor",
                     "license_status": status,
                     "expiration_date": row.get("EXPIRATION_DTE", ""),
