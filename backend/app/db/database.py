@@ -143,6 +143,25 @@ def get_total_api_credits() -> dict[str, int]:
     }
 
 
+def get_run_api_credits(run_id: int) -> dict[str, int]:
+    with get_connection() as conn:
+        apollo_credits = conn.execute(
+            "SELECT COALESCE(SUM(credits_used), 0) FROM api_credit_tracker WHERE service = 'apollo' AND run_id = ?", (run_id,)
+        ).fetchone()[0]
+        zerobounce_credits = conn.execute(
+            "SELECT COALESCE(SUM(credits_used), 0) FROM api_credit_tracker WHERE service = 'zerobounce' AND run_id = ?", (run_id,)
+        ).fetchone()[0]
+        apollo_requests = conn.execute(
+            "SELECT COALESCE(SUM(credits_used), 0) FROM api_credit_tracker WHERE service = 'apollo_search' AND run_id = ?", (run_id,)
+        ).fetchone()[0]
+    return {
+        "apollo_credits": apollo_credits,
+        "zerobounce_credits": zerobounce_credits,
+        "apollo_requests": apollo_requests,
+    }
+
+
+
 def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 

@@ -495,12 +495,12 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
 
             from app.services.apollo_enrichment import enrich_with_apollo
             log("Running Premium Apollo API enrichment...")
-            records = await enrich_with_apollo(records, log)
+            records = await enrich_with_apollo(records, log, run_id=run_id)
             set_run_status(run_id, "running", 75)
 
             from app.services.zerobounce_verifier import verify_emails_with_zerobounce
             log("Running ZeroBounce email deliverability verification...")
-            records = await verify_emails_with_zerobounce(records, log)
+            records = await verify_emails_with_zerobounce(records, log, run_id=run_id)
             set_run_status(run_id, "running", 85)
         else:
             log("Enrichment disabled. Skipping Ghost Hunter pipeline.")
@@ -512,6 +512,14 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
         insert_leads(run_id, cleaned)
         update_duplicate_counts()
         refresh_run_totals(run_id)
+
+        # Log Credit Summary for UI logs
+        from app.db.database import get_run_api_credits, get_total_api_credits
+        run_credits = get_run_api_credits(run_id)
+        total_credits = get_total_api_credits()
+        log(f"💳 [CREDIT SUMMARY THIS RUN] Apollo Credits Used: {run_credits['apollo_credits']} | ZeroBounce Credits Used: {run_credits['zerobounce_credits']} (Apollo API Searches: {run_credits['apollo_requests']})", "info")
+        log(f"📊 [TOTAL LIFETIME CREDITS] Total Apollo Credits Used: {total_credits['apollo_credits']} | Total ZeroBounce Credits Used: {total_credits['zerobounce_credits']}", "info")
+
         set_run_status(run_id, "completed", 100)
         log("Scrape completed.")
     except Exception as exc:

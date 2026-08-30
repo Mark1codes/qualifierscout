@@ -75,6 +75,7 @@ async def verify_emails_with_zerobounce(
     records: List[Dict[str, Any]],
     log: Callable[[str, str], None],
     batch_size: int = 5,
+    run_id: int | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Validates emails in records using ZeroBounce API.
@@ -127,7 +128,8 @@ async def verify_emails_with_zerobounce(
                     cache[email] = cache_data
                     zb_credits_used += 1
                     from app.db.database import log_api_credit
-                    log_api_credit("zerobounce", 1, details=f"ZeroBounce email check for {email}")
+                    log_api_credit("zerobounce", 1, run_id=run_id, details=f"ZeroBounce email check for {email}")
+
 
                 # Apply result to record
                 records[idx]["verification_status"] = verification_status

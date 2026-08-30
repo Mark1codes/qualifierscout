@@ -10,6 +10,7 @@ async def _enrich_single_apollo(
     url: str,
     api_key: str,
     log,
+    run_id: int | None = None,
 ) -> tuple[dict, int, bool]:
     """
     Enrich a single record with Apollo data.
@@ -54,7 +55,7 @@ async def _enrich_single_apollo(
         log(f"[APOLLO LOG] Searching Apollo database for: {name}...")
         from app.db.database import log_api_credit
         from app.services.network_guard import safe_http_request
-        log_api_credit("apollo_search", 1, details=f"Apollo search query for {name}")
+        log_api_credit("apollo_search", 1, run_id=run_id, details=f"Apollo search query for {name}")
 
         response = await safe_http_request(client, "POST", url, log=log, json=payload, headers=headers)
 
@@ -71,8 +72,9 @@ async def _enrich_single_apollo(
                     if email_status == "verified" or email_status == "extrapolated":
                         record["email"] = email
                         credits_used = 1
-                        log_api_credit("apollo", 1, details=f"Apollo verified email for {name}: {email}")
+                        log_api_credit("apollo", 1, run_id=run_id, details=f"Apollo verified email for {name}: {email}")
                         log(f"[APOLLO CREDIT LOG] Unlocked verified email for '{name}': {email} (1 Apollo Credit Used).")
+
                     else:
                         log(f"[APOLLO LOG] Apollo found email '{email}' but status was '{email_status}'. Ignoring to prevent bounces.")
 
@@ -139,6 +141,7 @@ async def enrich_with_apollo(
     records: List[Dict[str, Any]],
     log,
     batch_size: int = 3,
+    run_id: int | None = None,
 ) -> List[Dict[str, Any]]:
     api_key = os.getenv("APOLLO_API_KEY", "").strip()
     if not api_key:
@@ -159,9 +162,10 @@ async def enrich_with_apollo(
 
             # Fire all Apollo calls in this batch concurrently
             tasks = [
-                _enrich_single_apollo(client, record, url, api_key, log)
+                _enrich_single_apollo(client, record, url, api_key, log, run_id=run_id)
                 for _, record in batch
             ]
+
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             # Process results
