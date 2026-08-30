@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.db.database import get_connection, init_db, rows_to_dicts, get_existing_licenses
-from app.schemas import ExportRequest, LeadUpdateRequest, ScrapeStartRequest, ScrapeStartResponse
+from app.schemas import ExportRequest, LeadUpdateRequest, ScrapeStartRequest, ScrapeStartResponse, EnrichExistingRequest
 from app.scrapers.north_carolina import NorthCarolinaScraper
 from app.services.cleaner import clean_record
 from app.services.email_enrichment import enrich_with_email
@@ -144,6 +144,27 @@ def start_scrape(request: ScrapeStartRequest, background_tasks: BackgroundTasks)
 
     background_tasks.add_task(run_scrape, run_id, request)
     return ScrapeStartResponse(run_id=run_id)
+
+
+@app.post("/leads/enrich-existing", response_model=ScrapeStartResponse)
+def enrich_existing_leads(request: EnrichExistingRequest, background_tasks: BackgroundTasks) -> ScrapeStartResponse:
+    target_state = request.state or "All States"
+    target_city = request.city or "All Cities"
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO scrape_runs
+            (state, license_type, city, status, progress, max_records)
+            VALUES (?, 'Database Enrich', ?, 'queued', 0, ?)
+            """,
+            (target_state, target_city, request.limit),
+        )
+        run_id = int(cursor.lastrowid)
+        conn.execute("INSERT INTO scrape_logs (run_id, message) VALUES (?, ?)", (run_id, f"Queued database enrichment for existing leads ({target_state} / {target_city})."))
+
+    background_tasks.add_task(run_enrich_existing, run_id, request)
+    return ScrapeStartResponse(run_id=run_id)
+
 
 
 @app.get("/scrape/runs/{run_id}")
@@ -525,6 +546,107 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
     except Exception as exc:
         log(f"Scrape failed: {exc}", "error")
         set_run_status(run_id, "failed", 100)
+
+
+async def run_enrich_existing(run_id: int, request: EnrichExistingRequest) -> None:
+    def log(message: str, level: str = "info") -> None:
+        print(f"[{level.upper()}] {message}")
+        with get_connection() as conn:
+            conn.execute("INSERT INTO scrape_logs (run_id, message, level) VALUES (?, ?, ?)", (run_id, message, level))
+
+    try:
+        set_run_status(run_id, "running", 10)
+        log("Starting Database Lead Enrichment for existing un-enriched leads...")
+
+        where_clauses = ["(email IS NULL OR email = '' OR verification_status = 'not_verified')"]
+        params = []
+
+        if request.state and request.state != "all":
+            st_list = STATE_MAP.get(request.state, [request.state])
+            placeholders = ", ".join(["?"] * len(st_list))
+            where_clauses.append(f"state IN ({placeholders})")
+            params.extend(st_list)
+
+        if request.city and request.city != "all":
+            where_clauses.append("city = ?")
+            params.append(request.city)
+
+        if request.license_type and request.license_type != "all":
+            where_clauses.append("license_type LIKE ?")
+            params.append(f"%{request.license_type}%")
+
+        sql = f"SELECT * FROM leads WHERE {' AND '.join(where_clauses)} ORDER BY id DESC LIMIT ?"
+        params.append(request.limit)
+
+        with get_connection() as conn:
+            records = rows_to_dicts(conn.execute(sql, params).fetchall())
+
+        if not records:
+            log("No un-enriched database leads found matching criteria.")
+            set_run_status(run_id, "completed", 100)
+            return
+
+        log(f"Found {len(records)} un-enriched leads in database. ⚡ Starting Turbo Enrichment Pipeline...")
+        set_run_status(run_id, "running", 25)
+
+        from app.services.linkedin_enrichment import enrich_with_linkedin
+        log("Running Ghost Hunter decision-maker discovery & LinkedIn search...")
+        records = await enrich_with_linkedin(records, log)
+        set_run_status(run_id, "running", 50)
+
+        from app.services.apollo_enrichment import enrich_with_apollo
+        log("Running Premium Apollo API enrichment...")
+        records = await enrich_with_apollo(records, log, run_id=run_id)
+        set_run_status(run_id, "running", 75)
+
+        from app.services.zerobounce_verifier import verify_emails_with_zerobounce
+        log("Running ZeroBounce email deliverability verification...")
+        records = await verify_emails_with_zerobounce(records, log, run_id=run_id)
+        set_run_status(run_id, "running", 90)
+
+        # Update database records in-place
+        with get_connection() as conn:
+            for r in records:
+                conn.execute(
+                    """
+                    UPDATE leads SET
+                        contractor_name = ?,
+                        company_name = ?,
+                        email = ?,
+                        phone = ?,
+                        linkedin = ?,
+                        title = ?,
+                        website = ?,
+                        verification_status = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (
+                        r.get("contractor_name", ""),
+                        r.get("company_name", ""),
+                        r.get("email", ""),
+                        r.get("phone", ""),
+                        r.get("linkedin", ""),
+                        r.get("title", ""),
+                        r.get("website", ""),
+                        r.get("verification_status", "not_verified"),
+                        r["id"],
+                    ),
+                )
+
+        update_duplicate_counts()
+        from app.db.database import get_run_api_credits, get_total_api_credits
+        run_credits = get_run_api_credits(run_id)
+        total_credits = get_total_api_credits()
+        log(f"💳 [CREDIT SUMMARY THIS RUN] Apollo Credits Used: {run_credits['apollo_credits']} | ZeroBounce Credits Used: {run_credits['zerobounce_credits']} (Apollo API Searches: {run_credits['apollo_requests']})", "info")
+        log(f"📊 [TOTAL LIFETIME CREDITS] Total Apollo Credits Used: {total_credits['apollo_credits']} | Total ZeroBounce Credits Used: {total_credits['zerobounce_credits']}", "info")
+
+        set_run_status(run_id, "completed", 100)
+        log(f"Successfully enriched {len(records)} existing database leads!")
+    except Exception as exc:
+        log(f"Database enrichment failed: {exc}", "error")
+        set_run_status(run_id, "failed", 100)
+
 
 
 def set_run_status(run_id: int, status: str, progress: int) -> None:

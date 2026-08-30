@@ -22,7 +22,7 @@ import {
   Phone as PhoneIcon,
   Linkedin,
 } from "lucide-react";
-import { exportLeads, getLeads, getRun, startScrape, updateLead } from "./api/client";
+import { exportLeads, getLeads, getRun, startScrape, updateLead, enrichExistingLeads } from "./api/client";
 import type { Lead, LeadStats, ScrapeRun, VerificationStatus } from "./types/api";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -247,6 +247,29 @@ export function App() {
       setLoading(false);
     }
   }
+
+  async function handleEnrichExisting(targetState?: string, targetCity?: string) {
+    if (Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+    setLoading(true);
+    setMessage("Starting database lead enrichment...");
+    try {
+      const response = await enrichExistingLeads({
+        state: targetState ?? state,
+        city: targetCity ?? city,
+        license_type: licenseType,
+        limit: typeof maxRecords === "number" ? maxRecords : 500,
+      });
+      setRunId(response.run_id);
+      setMessage(`Database enrichment run #${response.run_id} started.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not start database enrichment.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
 
   async function handleImportCSV(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -593,10 +616,34 @@ export function App() {
                       </span>
                     </div>
                   </Field>
-                  <button className="primary-button" onClick={handleStartScrape} disabled={loading}>
-                    {loading ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-                    Start Scrape
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <button className="primary-button" onClick={handleStartScrape} disabled={loading}>
+                      {loading ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
+                      Start Scrape
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() => handleEnrichExisting()}
+                      disabled={loading}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justify: 'center',
+                        gap: '8px',
+                        padding: '10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--primary-color, #06D1D4)',
+                        background: 'rgba(6, 209, 212, 0.1)',
+                        color: '#06D1D4',
+                        fontWeight: 600,
+                        fontSize: '0.9rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      ⚡ Enrich Existing Database Leads ({state} / {city || 'All Cities'})
+                    </button>
+                  </div>
+
                   {/* 
                   <div style={{ marginTop: '12px' }}>
                     <label className="secondary-button" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer', padding: '10px', borderRadius: '6px', border: '1px solid var(--slate-700)', background: 'var(--slate-800)', color: 'var(--slate-200)', fontSize: '0.9rem' }}>
@@ -718,6 +765,17 @@ export function App() {
                         }} className="ghost-button" style={{ padding: "0 10px", border: "1px solid #d4dde5", background: "#fff", display: "flex", gap: "6px", height: "38px", color: "#344255" }}>
                           <Download size={15} /> Export
                         </button>
+                        <button
+                          onClick={() => {
+                            setActiveTab("Scraper");
+                            handleEnrichExisting(filterState !== "all" ? filterState : undefined, filterCity !== "all" ? filterCity : undefined);
+                          }}
+                          className="primary-button"
+                          style={{ padding: "0 12px", height: "38px", fontSize: "13px", display: "flex", gap: "6px", alignItems: "center", borderRadius: "6px" }}
+                        >
+                          ⚡ Enrich Visible Leads
+                        </button>
+
                         <select value={filterState} onChange={(event) => { setFilterState(event.target.value); setFilterCity("all"); }}>
                           <option value="all">All States</option>
                           {availableStates.map(s => <option key={s} value={s}>{s}</option>)}

@@ -18,6 +18,11 @@ export function startScrape(payload: ScrapeStartPayload): Promise<{ run_id: numb
   return request("/scrape/start", { method: "POST", body: JSON.stringify(payload) });
 }
 
+export function enrichExistingLeads(payload: { state?: string; city?: string; license_type?: string; limit?: number }): Promise<{ run_id: number }> {
+  return request("/leads/enrich-existing", { method: "POST", body: JSON.stringify(payload) });
+}
+
+
 export function getRun(runId: number): Promise<ScrapeRun> {
   return request(`/scrape/runs/${runId}`);
 }

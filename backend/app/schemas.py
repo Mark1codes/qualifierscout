@@ -38,3 +38,11 @@ class ExportRequest(BaseModel):
     status: str | None = None
     search: str | None = None
 
+
+class EnrichExistingRequest(BaseModel):
+    state: str | None = None
+    city: str | None = None
+    license_type: str | None = None
+    limit: int = Field(default=500, ge=1, le=5000)
+
+
