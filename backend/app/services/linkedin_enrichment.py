@@ -1,6 +1,7 @@
 """
 LinkedIn enrichment service using DuckDuckGo site:linkedin.com search.
 Runs after scraping to attempt to find LinkedIn profiles for each lead.
+Uses concurrent batch processing for 5x faster enrichment.
 """
 from __future__ import annotations
 
@@ -58,14 +59,34 @@ def _find_linkedin_sync(name: str, company: str, city: str, license_type: str) -
     return "", ""
 
 
+async def _enrich_single_linkedin(record_index: int, record: dict, license_type: str) -> tuple[int, str, str]:
+    """
+    Enrich a single record with LinkedIn data. Runs in a thread to avoid blocking.
+    Returns (record_index, discovered_name, linkedin_url).
+    """
+    name = record.get("contractor_name", "")
+    company = record.get("company_name", "")
+    city = record.get("city", "")
+
+    try:
+        discovered_name, linkedin_url = await asyncio.to_thread(
+            _find_linkedin_sync, name, company, city, license_type
+        )
+        return record_index, discovered_name, linkedin_url
+    except Exception:
+        return record_index, "", ""
+
+
 async def enrich_with_linkedin(
     records: list[dict],
     log: Callable,
     delay_seconds: float = 1.2,
+    batch_size: int = 5,
 ) -> list[dict]:
     """
     For each record, perform a DuckDuckGo search to find LinkedIn profiles and
     discover decision-maker names for company-only leads.
+    Uses concurrent batch processing for faster enrichment.
     """
     targets = [
         (i, r) for i, r in enumerate(records)
@@ -77,31 +98,48 @@ async def enrich_with_linkedin(
         log("No leads to enrich with LinkedIn.", "info")
         return records
 
-    log(f"Starting Ghost Hunter LinkedIn enrichment for {len(targets)} leads...")
+    log(f"Starting Ghost Hunter LinkedIn enrichment for {len(targets)} leads (batch size: {batch_size})...")
 
     found = 0
-    for idx, (record_index, record) in enumerate(targets):
-        name = record.get("contractor_name", "")
-        company = record.get("company_name", "")
-        city = record.get("city", "")
-        license_type = record.get("license_type", "contractor")
+    total_batches = (len(targets) + batch_size - 1) // batch_size
 
-        try:
-            discovered_name, linkedin_url = await asyncio.to_thread(
-                _find_linkedin_sync, name, company, city, license_type
+    for batch_num in range(total_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min(start_idx + batch_size, len(targets))
+        batch = targets[start_idx:end_idx]
+
+        # Fire all searches in this batch concurrently
+        tasks = [
+            _enrich_single_linkedin(
+                record_index,
+                record,
+                record.get("license_type", "contractor")
             )
+            for record_index, record in batch
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Process results
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            record_index, discovered_name, linkedin_url = result
             if linkedin_url:
                 records[record_index]["linkedin"] = linkedin_url
                 if discovered_name and not records[record_index].get("contractor_name"):
                     records[record_index]["contractor_name"] = discovered_name
+                    company = records[record_index].get("company_name", "")
                     log(f"Ghost Hunter discovered decision maker for {company}: {discovered_name}")
                 found += 1
                 log(f"Found LinkedIn: {linkedin_url}")
 
-        except Exception:
-            pass
+        # Log progress every 2 batches
+        if (batch_num + 1) % 2 == 0 or batch_num == total_batches - 1:
+            processed = min(end_idx, len(targets))
+            log(f"LinkedIn enrichment progress: {processed}/{len(targets)} leads processed ({found} profiles found so far).")
 
-        if idx < len(targets) - 1:
+        # Rate limit pause between batches (not after the last batch)
+        if batch_num < total_batches - 1:
             await asyncio.sleep(delay_seconds)
 
     log(f"LinkedIn enrichment complete: {found}/{len(targets)} profiles found.")

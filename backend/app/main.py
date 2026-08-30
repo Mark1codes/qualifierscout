@@ -486,17 +486,22 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
         set_run_status(run_id, "running", 50)
         
         if request.enrich_leads:
+            log(f"⚡ Starting Turbo Enrichment Pipeline for {len(records)} new leads...")
+            
             from app.services.linkedin_enrichment import enrich_with_linkedin
             log("Running Ghost Hunter decision-maker discovery & LinkedIn search...")
             records = await enrich_with_linkedin(records, log)
+            set_run_status(run_id, "running", 60)
 
             from app.services.apollo_enrichment import enrich_with_apollo
             log("Running Premium Apollo API enrichment...")
             records = await enrich_with_apollo(records, log)
+            set_run_status(run_id, "running", 75)
 
             from app.services.zerobounce_verifier import verify_emails_with_zerobounce
             log("Running ZeroBounce email deliverability verification...")
             records = await verify_emails_with_zerobounce(records, log)
+            set_run_status(run_id, "running", 85)
         else:
             log("Enrichment disabled. Skipping Ghost Hunter pipeline.")
             
