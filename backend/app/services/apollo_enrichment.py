@@ -29,8 +29,11 @@ async def _enrich_single_apollo(
 
     has_linkedin = bool(record.get("linkedin"))
     has_company = bool(record.get("company_name"))
-    if record.get("state") == "NM" and not has_linkedin and not has_company:
-        log(f"[APOLLO CREDIT LOG] Skipping Apollo for {name} (No LinkedIn/Company found). Saves 1 credit.")
+    
+    # GLOBAL CREDIT GUARD: Require either LinkedIn profile OR Company Name before calling Apollo!
+    # Searching Apollo with just first/last name burns credits on vague/incorrect matches.
+    if not has_linkedin and not has_company:
+        log(f"[APOLLO CREDIT GUARD] Skipping Apollo for '{name}' (No LinkedIn profile or Company Name). Saved 1 Apollo credit.")
         return record, 0, False
 
     payload = {
@@ -64,6 +67,10 @@ async def _enrich_single_apollo(
             person = data.get("person", {})
 
             if person:
+                # Apollo billed 1 credit for returning this matched person profile
+                credits_used = 1
+                log_api_credit("apollo", 1, run_id=run_id, details=f"Apollo match for {name}")
+
                 # Extract Email (Strictly Verified Only)
                 email = person.get("email") or person.get("personal_email")
                 email_status = (person.get("email_status") or "").lower()
@@ -71,12 +78,12 @@ async def _enrich_single_apollo(
                 if email:
                     if email_status == "verified" or email_status == "extrapolated":
                         record["email"] = email
-                        credits_used = 1
-                        log_api_credit("apollo", 1, run_id=run_id, details=f"Apollo verified email for {name}: {email}")
                         log(f"[APOLLO CREDIT LOG] Unlocked verified email for '{name}': {email} (1 Apollo Credit Used).")
-
                     else:
-                        log(f"[APOLLO LOG] Apollo found email '{email}' but status was '{email_status}'. Ignoring to prevent bounces.")
+                        log(f"[APOLLO LOG] Apollo matched '{name}' (1 Credit Used), but email status was '{email_status}'. Ignored email to prevent bounces.")
+                else:
+                    log(f"[APOLLO LOG] Apollo matched '{name}' profile details (1 Credit Used).")
+
 
                 # Extract Phone
                 phone = person.get("phone_numbers", [])
