@@ -139,6 +139,21 @@ class OklahomaScraper:
         return records
 
     async def _scrape_with_playwright(self, request: ScrapeStartRequest, license_type: str, log) -> list[dict]:
+        def _run_in_thread():
+            import sys
+            import asyncio
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            return asyncio.run(self._scrape_with_playwright_internal(request, license_type, log))
+
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, _run_in_thread)
+        except RuntimeError:
+            return await self._scrape_with_playwright_internal(request, license_type, log)
+
+    async def _scrape_with_playwright_internal(self, request: ScrapeStartRequest, license_type: str, log) -> list[dict]:
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(**self._browser_launch_options())
             context = await browser.new_context(
