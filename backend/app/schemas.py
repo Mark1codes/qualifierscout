@@ -14,7 +14,7 @@ class ScrapeStartRequest(BaseModel):
     county: str | None = None
     zip_code: str | None = None
     license_status: str = Field(default="Active")
-    max_records: int = Field(default=50, ge=1, le=5000)
+    max_records: int = Field(default=50, ge=1, le=15000)
     enrich_leads: bool = Field(default=True)
     individuals_only: bool = Field(default=False)
 
@@ -43,6 +43,6 @@ class EnrichExistingRequest(BaseModel):
     state: str | None = None
     city: str | None = None
     license_type: str | None = None
-    limit: int = Field(default=500, ge=1, le=5000)
+    limit: int = Field(default=500, ge=1, le=15000)
 
 
