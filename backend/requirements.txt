@@ -9,3 +9,4 @@ ddgs
 python-dotenv
 playwright
 playwright-stealth
+python-multipart
