@@ -30,21 +30,36 @@ async def _enrich_single_apollo(
     has_linkedin = bool(record.get("linkedin"))
     has_company = bool(record.get("company_name"))
     
-    # GLOBAL CREDIT GUARD: Require either LinkedIn profile OR Company Name before calling Apollo!
-    # Searching Apollo with just first/last name burns credits on vague/incorrect matches.
-    if not has_linkedin and not has_company:
-        log(f"[APOLLO CREDIT GUARD] Skipping Apollo for '{name}' (No LinkedIn profile or Company Name). Saved 1 Apollo credit.")
-        return record, 0, False
-
     payload = {
         "first_name": first_name,
         "last_name": last_name,
         "reveal_personal_emails": True
     }
+    
+    # Determine search mode
+    search_mode = "standard"
     if has_linkedin:
         payload["linkedin_url"] = record.get("linkedin")
-    if has_company:
+        search_mode = "linkedin"
+    elif has_company:
         payload["organization_name"] = record.get("company_name")
+        search_mode = "company"
+    else:
+        # Fallback: Individual contractor with no company or LinkedIn
+        # Add geographic context (city/state) for more precise matching
+        city = (record.get("city") or "").strip()
+        state = (record.get("state") or "").strip()
+        if city or state:
+            if city:
+                payload["city"] = city
+            if state:
+                payload["state"] = state
+            search_mode = "individual_fallback"
+            log(f"[APOLLO FALLBACK] Searching individual contractor '{name}' with geographic context ({city}, {state})...")
+        else:
+            # No triangulation point available at all
+            log(f"[APOLLO CREDIT GUARD] Skipping Apollo for '{name}' (No LinkedIn, Company Name, or Location). Saved 1 Apollo credit.")
+            return record, 0, False
 
     headers = {
         "X-Api-Key": api_key,
@@ -55,10 +70,10 @@ async def _enrich_single_apollo(
     should_drop = False
 
     try:
-        log(f"[APOLLO LOG] Searching Apollo database for: {name}...")
+        log(f"[APOLLO LOG] Searching Apollo database for: {name}... (Mode: {search_mode})")
         from app.db.database import log_api_credit
         from app.services.network_guard import safe_http_request
-        log_api_credit("apollo_search", 1, run_id=run_id, details=f"Apollo search query for {name}")
+        log_api_credit("apollo_search", 1, run_id=run_id, details=f"Apollo {search_mode} search for {name}")
 
         response = await safe_http_request(client, "POST", url, log=log, json=payload, headers=headers)
 
@@ -69,7 +84,7 @@ async def _enrich_single_apollo(
             if person:
                 # Apollo billed 1 credit for returning this matched person profile
                 credits_used = 1
-                log_api_credit("apollo", 1, run_id=run_id, details=f"Apollo match for {name}")
+                log_api_credit("apollo", 1, run_id=run_id, details=f"Apollo {search_mode} match for {name}")
 
                 # Extract Email (Strictly Verified Only)
                 email = person.get("email") or person.get("personal_email")

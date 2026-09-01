@@ -46,17 +46,31 @@ def quality_score(record: dict) -> int:
     return min(score, 100)
 
 
+def _looks_like_person_name(value: str) -> bool:
+    text = normalize_space(value)
+    if not text:
+        return False
+    if "," in text:
+        last_name, first_name = [part.strip() for part in text.split(",", 1)]
+        if last_name and first_name:
+            return True
+    words = re.findall(r"[A-Za-z]+", text)
+    return 2 <= len(words) <= 4 and not any(word.upper() in {"INC", "LLC", "CORP", "CORPORATION", "CO", "COMPANY", "LTD", "LIMITED", "LP", "LLP", "PLLC", "CONTRACTOR", "CONTRACTORS", "CONSTRUCTION", "SERVICES", "SERVICE", "GROUP", "BUILDERS", "SYSTEMS", "HVAC", "MECHANICAL", "ELECTRICAL", "PLUMBING", "AIR", "HEATING", "COOLING", "INDUSTRIES", "ENTERPRISES", "SOLUTIONS"} for word in words)
+
+
 def clean_record(record: dict) -> dict:
     cleaned = {key: normalize_space(value) if isinstance(value, str) else value for key, value in record.items()}
     cleaned["phone"] = normalize_phone(cleaned.get("phone"))
-    
+
     # Clean bad company names that ruin cold email personalization
     company_name = (cleaned.get("company_name") or "").strip()
     contractor_name = (cleaned.get("contractor_name") or "").strip()
-    
+
     if company_name.lower() in ["self employed", "self-employed", "freelance", "freelancer", "independent contractor"]:
         cleaned["company_name"] = ""
     elif company_name and contractor_name and company_name.lower() == contractor_name.lower():
+        cleaned["company_name"] = ""
+    elif cleaned.get("state") == "OK" and company_name and _looks_like_person_name(company_name):
         cleaned["company_name"] = ""
 
     cleaned["duplicate_key"] = duplicate_key(cleaned)

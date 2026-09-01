@@ -65,6 +65,10 @@ try:
     from app.scrapers.arizona import ArizonaScraper
 except ImportError:
     ArizonaScraper = None
+try:
+    from app.scrapers.oklahoma import OklahomaScraper
+except ImportError:
+    OklahomaScraper = None
 
 SCRAPER_REGISTRY = {
     "North Carolina": NorthCarolinaScraper,
@@ -78,6 +82,7 @@ SCRAPER_REGISTRY = {
     "Utah": UtahScraper,
     "Colorado": ColoradoScraper,
     "Arizona": ArizonaScraper,
+    "Oklahoma": OklahomaScraper,
 }
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -86,6 +91,7 @@ EXPORT_DIR = BASE_DIR / "exports"
 EXPORT_COLUMNS = [
     "license_type",
     "license_number",
+    "license_status",
     "company_name",
     "website",
     "contractor_name",
@@ -193,6 +199,7 @@ STATE_MAP = {
     "Utah": ["Utah", "UT"],
     "Colorado": ["Colorado", "CO"],
     "Arizona": ["Arizona", "AZ"],
+    "Oklahoma": ["Oklahoma", "OK"],
     "FL": ["Florida", "FL"],
     "CA": ["California", "CA"],
     "GA": ["Georgia", "GA"],
@@ -204,6 +211,7 @@ STATE_MAP = {
     "UT": ["Utah", "UT"],
     "CO": ["Colorado", "CO"],
     "AZ": ["Arizona", "AZ"],
+    "OK": ["Oklahoma", "OK"],
 }
 
 
@@ -441,6 +449,12 @@ def export_leads(request: ExportRequest) -> FileResponse:
             return ""
         if fullname and (comp.lower() == fullname.lower() or comp.lower() == fname.lower() or comp.lower() == lname.lower()):
             return ""
+        if "," in comp:
+            words = set(re.findall(r"\b[A-Za-z0-9]+\b", comp.upper()))
+            if not (words & corp_indicators):
+                last, first = [part.strip() for part in comp.split(",", 1)]
+                if fullname and f"{first} {last}".lower() == fullname.lower():
+                    return ""
         return comp.title()
 
     df["company_name"] = df.apply(clean_export_company, axis=1)
@@ -449,6 +463,7 @@ def export_leads(request: ExportRequest) -> FileResponse:
     header_mapping = {
         "license_type": "Code",
         "license_number": "License Number",
+        "license_status": "License Status",
         "company_name": "Company Name",
         "website": "Website",
         "title": "Title",

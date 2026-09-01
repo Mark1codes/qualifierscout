@@ -50,6 +50,7 @@ const CITIES_BY_STATE: Record<string, string[]> = {
   "Arizona": ["Phoenix", "Tucson", "Mesa", "Glendale", "Buckeye", "Benson", "Bouse", "Cottonwood", "Peoria", "Snowflake", "Kingman", "Fredonia", "Queen Creek", "Yuma", "Willcox", "Vail", "Dewey", "Chino Valley", "Casa Grande", "Cornville", "Litchfield Park", "Springerville", "Gold Canyon", "Payson", "Show Low", "New River", "Camp Verde", "Saint Johns", "Morristown", "Chandler", "Gilbert", "Scottsdale", "Tempe", "Surprise", "Goodyear", "Avondale", "Flagstaff", "Lake Havasu City", "Apache Junction", "Maricopa", "Oro Valley", "Prescott", "Bullhead City", "Prescott Valley", "Marana", "Sierra Vista"],
   "Utah": ["Salt Lake City", "West Valley City", "Provo", "West Jordan", "Orem", "Sandy", "Ogden", "St. George", "Layton", "South Jordan", "Lehi", "Millcreek", "Taylorsville", "Logan", "Murray", "Draper", "Bountiful", "Riverton", "Spanish Fork", "Roy", "Pleasant Grove", "Kearns", "Tooele", "Cottonwood Heights", "Midvale", "Springville", "Eagle Mountain", "Cedar City", "American Fork", "Kaysville"],
   "Colorado": ["Denver", "Colorado Springs", "Aurora", "Fort Collins", "Lakewood", "Thornton", "Arvada", "Westminster", "Pueblo", "Greeley", "Centennial", "Boulder", "Highlands Ranch", "Longmont", "Loveland", "Broomfield", "Castle Rock", "Commerce City", "Parker", "Littleton"],
+  "Oklahoma": ["Oklahoma City", "Tulsa", "Norman", "Broken Arrow", "Edmond", "Lawton", "Moore", "Midwest City", "Enid", "Stillwater", "Muskogee", "Bartlesville", "Owasso", "Shawnee", "Ardmore", "Yukon", "Bixby", "Sapulpa", "Duncan", "Del City", "Jenks", "Claremore", "Mustang", "Sand Springs", "Ada", "Ponca City", "Altus", "El Reno", "Durant", "McAlester"],
 };
 
 const ALL_LICENSE_TYPES = [
@@ -145,6 +146,11 @@ const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
     "HVAC Contractor",
     "Roofing Contractor",
     "Solar Contractor",
+  ],
+  Oklahoma: [
+    "Electrical Contractor",
+    "Plumbing Contractor",
+    "Mechanical Contractor",
   ]
 };
 
@@ -628,13 +634,13 @@ export function App() {
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        justify: 'center',
+                        justifyContent: 'center',
                         gap: '8px',
                         padding: '10px',
-                        borderRadius: '6px',
-                        border: '1px solid var(--primary-color, #06D1D4)',
-                        background: 'rgba(6, 209, 212, 0.1)',
-                        color: '#06D1D4',
+                        borderRadius: '8px',
+                        border: '1px solid #d9ccff',
+                        background: '#f5f1ff',
+                        color: '#5c32c7',
                         fontWeight: 600,
                         fontSize: '0.9rem',
                         cursor: 'pointer'

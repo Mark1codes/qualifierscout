@@ -19,10 +19,52 @@ OFFICIAL_SEARCH_URL = (
     "LicenseeSearch/LicenseeSearch.aspx"
 )
 OK_LICENSE_TYPES = {
-    "Electrical Contractor": ["Electrical Contractor", "Electrical"],
-    "Plumbing Contractor": ["Plumbing Contractor", "Plumbing"],
-    "Mechanical Contractor": ["Mechanical Contractor", "Mechanical"],
-    "HVAC Contractor": ["Mechanical Contractor", "Mechanical"],
+    "Electrical Contractor": [
+        "Electrical Contractor",
+        "Electrical Contractor License",
+        "Electrical",
+    ],
+    "Plumbing Contractor": [
+        "Plumbing Contractor",
+        "Plumbing Contractor License",
+        "Plumbing",
+    ],
+    "Mechanical Contractor": [
+        "Mechanical Contractor",
+        "Mechanical Contractor License",
+        "Mechanical",
+    ],
+    "HVAC Contractor": [
+        "HVAC Contractor",
+        "HVAC Contractor License",
+        "Mechanical Contractor",
+        "Mechanical Contractor License",
+        "Mechanical",
+    ],
+    "Electrical Apprentice Registration": [
+        "Electrical Apprentice Registration",
+        "Electrical Apprentice",
+    ],
+    "Mechanical Apprentice Registration": [
+        "Mechanical Apprentice Registration",
+        "Mechanical Apprentice",
+    ],
+    "Electrical Journeyman License": [
+        "Electrical Journeyman License",
+        "Electrical Journeyman",
+    ],
+    "Mechanical Journeyman License": [
+        "Mechanical Journeyman License",
+        "Mechanical Journeyman",
+    ],
+    "Plumbing Journeyman License": [
+        "Plumbing Journeyman License",
+        "Plumbing Journeyman",
+    ],
+    "Plumbing Apprentice Registration": [
+        "Plumbing Apprentice Registration",
+        "Plumbing Apprentice",
+    ],
 }
 
 OK_CITIES = {
@@ -44,20 +86,51 @@ CORP_INDICATORS = {
 
 
 def normalize_oklahoma_license_type(requested_type: str) -> str:
-    if requested_type in OK_LICENSE_TYPES:
-        return requested_type
-    if "electric" in requested_type.lower():
+    normalized = clean_text(requested_type)
+    if not normalized:
+        raise ValueError("Oklahoma license type is required.")
+
+    lowered = normalized.lower()
+    for official_name in OK_LICENSE_TYPES:
+        if lowered == official_name.lower():
+            return official_name
+        if any(lowered == alias.lower() for alias in OK_LICENSE_TYPES[official_name]):
+            return official_name
+
+    if "electrical" in lowered:
         return "Electrical Contractor"
-    if "plumb" in requested_type.lower():
+    if "plumb" in lowered:
         return "Plumbing Contractor"
-    if "mechanical" in requested_type.lower() or "hvac" in requested_type.lower():
+    if "mechanical" in lowered or "hvac" in lowered:
         return "Mechanical Contractor"
     raise ValueError(
-        "Oklahoma CIB scraper supports Electrical Contractor, Plumbing Contractor, and Mechanical Contractor only."
+        "Oklahoma CIB scraper supports Oklahoma contractor and apprentice license names only."
     )
 
 
+def _looks_like_person_name(value: str) -> bool:
+    name = clean_text(value)
+    if not name:
+        return False
+
+    if "," in name:
+        last_name, first_name = [part.strip() for part in name.split(",", 1)]
+        if last_name and first_name:
+            return True
+
+    words = re.findall(r"[A-Za-z]+", name)
+    return 2 <= len(words) <= 4 and not any(word.upper() in CORP_INDICATORS for word in words)
+
+
 def parse_oklahoma_name(raw_name: str) -> tuple[str, str]:
+    """
+    Oklahoma licensee names can be either:
+    - individual/person names like 'AARON, MARK LEE' or 'Mark Lee Aaron'
+    - business names like 'ABC ELECTRIC LLC' or 'Smith Plumbing & Heating Co.'
+
+    For this project, the target is usually the individual contractor when present,
+    and the business name only when it is clearly an entity.
+    """
     name = clean_text(raw_name)
     if not name:
         return "", ""
@@ -65,14 +138,16 @@ def parse_oklahoma_name(raw_name: str) -> tuple[str, str]:
     words = set(re.findall(r"\b[A-Za-z0-9]+\b", name.upper()))
     is_company = bool(words & CORP_INDICATORS)
 
-    if "," in name and not is_company:
-        last_name, first_name = [part.strip() for part in name.split(",", 1)]
-        return f"{first_name.title()} {last_name.title()}".strip(), name
-
     if is_company:
         return "", name
 
-    return name.title(), name
+    if _looks_like_person_name(name):
+        if "," in name:
+            last_name, first_name = [part.strip() for part in name.split(",", 1)]
+            return f"{first_name.title()} {last_name.title()}".strip(), ""
+        return name.title(), ""
+
+    return "", name
 
 
 def clean_text(value: Any) -> str:
@@ -204,15 +279,18 @@ class OklahomaScraper:
         await self._fill_by_labels(page, ["state"], "OK")
 
         log(f"Submitting Oklahoma CIB search for {license_type} in {city or 'all cities'}...")
-        search_button = page.get_by_role("button", name=re.compile(r"search|find|submit", re.I)).first
-        if await search_button.count():
-            await search_button.click(timeout=10_000)
-        else:
-            submit = page.locator("input[type='submit'], input[type='button'], button").filter(has_text=re.compile("search|find", re.I)).first
-            await submit.click(timeout=10_000)
-
-        await page.wait_for_load_state("networkidle", timeout=45_000)
-        await page.wait_for_timeout(1_500)
+        submit = page.locator("#btnSubmit, input[type='submit'], input[type='button']").first
+        if not await submit.count():
+            submit = page.get_by_role("button", name=re.compile(r"search|find|submit", re.I)).first
+        if not await submit.count():
+            raise RuntimeError("could not find Oklahoma CIB search submit control")
+        await submit.wait_for(state="visible", timeout=10_000)
+        await submit.evaluate("element => element.click()")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=45_000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(3_000)
 
     async def _select_option_by_text(self, page: Page, labels: list[str]) -> None:
         selects = page.locator("select")
@@ -379,10 +457,28 @@ class OklahomaScraper:
 
     @staticmethod
     def _extract_status(text: str) -> str:
-        if re.search(r"\b(active|current|valid)\b", text, re.I):
-            return "Active"
-        if re.search(r"\b(expired|inactive|suspended|revoked|cancelled)\b", text, re.I):
-            return "Inactive"
+        """
+        Extract license status from portal text.
+        Returns the actual status value (Active, Expired, Suspended, Revoked, etc.)
+        to match the portal's exact status representation.
+        """
+        text_upper = text.upper()
+        
+        # Check for specific status values in order of priority
+        # These match the Oklahoma CIB portal's actual status labels
+        status_patterns = [
+            (r"\b(SUSPENDED)\b", "Suspended"),
+            (r"\b(REVOKED)\b", "Revoked"),
+            (r"\b(EXPIRED|EXPIRATION)\b", "Expired"),
+            (r"\b(CANCELLED|WITHDRAWN|INACTIVE)\b", "Inactive"),
+            (r"\b(ACTIVE|CURRENT|VALID)\b", "Active"),
+        ]
+        
+        for pattern, status in status_patterns:
+            if re.search(pattern, text_upper):
+                return status
+        
+        # Default to Active if no status found
         return "Active"
 
     @staticmethod
@@ -487,7 +583,7 @@ class OklahomaScraper:
             connection_url = connection_url_or_key
         else:
             connection_url = "wss://browser.zenrows.com?" + urlencode(
-                {"apikey": connection_url_or_key, "proxy_country": "us", "session_ttl": "2m"}
+                {"apikey": connection_url_or_key, "proxy_country": "us", "session_ttl": "10m"}
             )
             
         async with async_playwright() as playwright:
@@ -507,4 +603,3 @@ class OklahomaScraper:
             finally:
                 await page.close()
                 await browser.close()
-
