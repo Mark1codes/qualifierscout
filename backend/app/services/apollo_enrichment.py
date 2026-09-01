@@ -30,10 +30,14 @@ async def _enrich_single_apollo(
     has_linkedin = bool(record.get("linkedin"))
     has_company = bool(record.get("company_name"))
     
+    state_code = (record.get("state") or "").strip().upper()
+    native_phone_states = {"AZ", "CA", "FL"}
+    
     payload = {
         "first_name": first_name,
         "last_name": last_name,
-        "reveal_personal_emails": True
+        "reveal_personal_emails": True,
+        "reveal_phone_number": False  # GUARANTEE: Never spend 8 Mobile Credits per lead for phone reveals
     }
     
     # Determine search mode
