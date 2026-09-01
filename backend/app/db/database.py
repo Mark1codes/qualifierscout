@@ -100,21 +100,8 @@ def init_db() -> None:
         except Exception:
             pass  # Column already exists
 
-        # Seed initial credit totals if tracker table is newly created
-        count = conn.execute("SELECT COUNT(*) FROM api_credit_tracker").fetchone()[0]
-        if count == 0:
-            conn.execute(
-                "INSERT INTO api_credit_tracker (service, credits_used, details) VALUES (?, ?, ?)",
-                ("apollo", 870, "Initial baseline Apollo credit usage"),
-            )
-            conn.execute(
-                "INSERT INTO api_credit_tracker (service, credits_used, details) VALUES (?, ?, ?)",
-                ("zerobounce", 587, "Initial baseline ZeroBounce credit usage"),
-            )
-            conn.execute(
-                "INSERT INTO api_credit_tracker (service, credits_used, details) VALUES (?, ?, ?)",
-                ("apollo_search", 3685, "Initial baseline Apollo search requests"),
-            )
+        # Table initialized cleanly to track actual scraper API credit usage
+        pass
 
 
 def log_api_credit(service: str, credits_used: int = 1, run_id: int | None = None, details: str = "") -> None:
