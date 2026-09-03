@@ -79,17 +79,43 @@ def _find_website_sync(name: str, company: str, city: str) -> str | None:
 def _search_buildzoom_sync(name: str, city: str, license_number: str = "") -> str | None:
     """Scrape contractor profiles from BuildZoom 100% for free."""
     try:
-        from ddgs import DDGS
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         clean_name = _clean_name_for_email_search(name) if name else ""
-        
+
+        # 1. Direct Slug Resolution Attempt
+        if clean_name:
+            slug = clean_name.lower().replace(" ", "-").replace(".", "")
+            direct_url = f"https://www.buildzoom.com/contractor/{slug}"
+            try:
+                resp = httpx.get(direct_url, headers=headers, timeout=5, follow_redirects=True)
+                if resp.status_code == 200:
+                    emails = EMAIL_REGEX.findall(resp.text)
+                    real_emails = [
+                        e for e in emails 
+                        if is_real_email(e) 
+                        and "buildzoom" not in e.lower() 
+                        and "blockrenovation" not in e.lower()
+                        and "example.com" not in e.lower()
+                        and "email.com" not in e.lower()
+                    ]
+                    if real_emails:
+                        name_parts = [p.lower() for p in clean_name.split() if len(p) > 2]
+                        for e in real_emails:
+                            e_low = e.lower()
+                            if any(p in e_low for p in name_parts):
+                                return e
+                        return real_emails[0]
+            except Exception:
+                pass
+
+        # 2. Public Search Query Attempt
+        from ddgs import DDGS
         queries = []
         if license_number:
-            queries.append(f'site:buildzoom.com "{license_number}" Oklahoma')
+            queries.append(f'site:buildzoom.com {license_number} Oklahoma')
         if clean_name:
-            queries.append(f'site:buildzoom.com "{clean_name}" {city}')
+            queries.append(f'site:buildzoom.com {clean_name} {city}')
 
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        
         for query in queries:
             try:
                 with DDGS() as ddgs:
