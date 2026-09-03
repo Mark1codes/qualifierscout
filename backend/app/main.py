@@ -529,15 +529,20 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
             records = await enrich_with_linkedin(records, log)
             set_run_status(run_id, "running", 60)
 
+            from app.services.email_enrichment import enrich_with_email
+            log("Running Free Public Web Enrichment (Website & Email Scraper)...")
+            records = await enrich_with_email(records, log)
+            set_run_status(run_id, "running", 70)
+
             from app.services.apollo_enrichment import enrich_with_apollo
             log("Running Premium Apollo API enrichment...")
             records = await enrich_with_apollo(records, log, run_id=run_id)
-            set_run_status(run_id, "running", 75)
+            set_run_status(run_id, "running", 80)
 
             from app.services.zerobounce_verifier import verify_emails_with_zerobounce
             log("Running ZeroBounce email deliverability verification...")
             records = await verify_emails_with_zerobounce(records, log, run_id=run_id)
-            set_run_status(run_id, "running", 85)
+            set_run_status(run_id, "running", 90)
         else:
             log("Enrichment disabled. Skipping Ghost Hunter pipeline.")
             
@@ -607,7 +612,12 @@ async def run_enrich_existing(run_id: int, request: EnrichExistingRequest) -> No
         from app.services.linkedin_enrichment import enrich_with_linkedin
         log("Running Ghost Hunter decision-maker discovery & LinkedIn search...")
         records = await enrich_with_linkedin(records, log)
-        set_run_status(run_id, "running", 50)
+        set_run_status(run_id, "running", 45)
+
+        from app.services.email_enrichment import enrich_with_email
+        log("Running Free Public Web Enrichment (Website & Email Scraper)...")
+        records = await enrich_with_email(records, log)
+        set_run_status(run_id, "running", 60)
 
         from app.services.apollo_enrichment import enrich_with_apollo
         log("Running Premium Apollo API enrichment...")
