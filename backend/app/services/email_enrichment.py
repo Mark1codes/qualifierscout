@@ -82,6 +82,8 @@ def _search_buildzoom_sync(name: str, city: str, license_number: str = "") -> st
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         clean_name = _clean_name_for_email_search(name) if name else ""
 
+        name_parts = [p.lower() for p in clean_name.split() if len(p) > 2]
+
         # 1. Direct Slug Resolution Attempt
         if clean_name:
             slug = clean_name.lower().replace(" ", "-").replace(".", "")
@@ -98,13 +100,11 @@ def _search_buildzoom_sync(name: str, city: str, license_number: str = "") -> st
                         and "example.com" not in e.lower()
                         and "email.com" not in e.lower()
                     ]
-                    if real_emails:
-                        name_parts = [p.lower() for p in clean_name.split() if len(p) > 2]
-                        for e in real_emails:
-                            e_low = e.lower()
-                            if any(p in e_low for p in name_parts):
-                                return e
-                        return real_emails[0]
+                    # STRICT MATCH: Must match contractor name parts to avoid sidebar false-positives
+                    for e in real_emails:
+                        e_low = e.lower()
+                        if name_parts and any(p in e_low for p in name_parts):
+                            return e
             except Exception:
                 pass
 
@@ -137,13 +137,11 @@ def _search_buildzoom_sync(name: str, city: str, license_number: str = "") -> st
                             and "example.com" not in e.lower()
                             and "email.com" not in e.lower()
                         ]
-                        if real_emails:
-                            name_parts = [p.lower() for p in clean_name.split() if len(p) > 2]
-                            for e in real_emails:
-                                e_low = e.lower()
-                                if any(p in e_low for p in name_parts):
-                                    return e
-                            return real_emails[0]
+                        # STRICT MATCH: Must match contractor name parts to avoid sidebar false-positives
+                        for e in real_emails:
+                            e_low = e.lower()
+                            if name_parts and any(p in e_low for p in name_parts):
+                                return e
     except Exception:
         pass
     return None
