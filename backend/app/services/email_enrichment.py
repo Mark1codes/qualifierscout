@@ -85,27 +85,48 @@ def _scrape_email_sync(website_url: str) -> str | None:
     return None
 
 
-def _search_email_directly_sync(name: str, city: str, company: str) -> str | None:
-    """Fallback: search DuckDuckGo for the email directly."""
+def _clean_name_for_email_search(raw_name: str) -> str:
+    """Extract First and Last name, removing middle initials/names."""
+    parts = [p for p in raw_name.strip().split() if len(p) > 1 and not p.endswith(".")]
+    if len(parts) >= 2:
+        return f"{parts[0]} {parts[-1]}"
+    return raw_name
+
+
+def _search_email_directly_sync(name: str, city: str, company: str, license_type: str = "") -> str | None:
+    """Fallback: search DuckDuckGo for public contractor emails using targeted queries."""
     try:
         from ddgs import DDGS
-        search_name = company if company else name
-        # Remove strict quotes
-        query = f'{search_name} {city} contractor email'
+        clean_name = _clean_name_for_email_search(name) if name else ""
+        search_name = company if company else clean_name
+        if not search_name:
+            return None
+
+        trade = license_type.split("-")[0].replace("Contractor", "").strip() if license_type else ""
+
+        queries = [
+            f'{search_name} {city} Oklahoma contractor email',
+            f'{clean_name} {city} {trade} gmail.com OR yahoo.com OR outlook.com'
+        ]
+
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=3))
-        for r in results:
-            text = r.get("body", "") + " " + r.get("href", "")
-            emails = EMAIL_REGEX.findall(text)
-            real_emails = [e for e in emails if is_real_email(e)]
-            if real_emails:
-                return real_emails[0]
+            for query in queries:
+                try:
+                    results = list(ddgs.text(query, max_results=3))
+                    for r in results:
+                        text = (r.get("body", "") or "") + " " + (r.get("title", "") or "") + " " + (r.get("href", "") or "")
+                        emails = EMAIL_REGEX.findall(text)
+                        real_emails = [e for e in emails if is_real_email(e)]
+                        if real_emails:
+                            return real_emails[0]
+                except Exception:
+                    continue
     except Exception:
         pass
     return None
 
 
-def _enrich_single_lead_sync(name: str, company: str, city: str) -> dict:
+def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: str = "") -> dict:
     result = {"website": None, "email": None}
     
     website = _find_website_sync(name, company, city)
@@ -116,7 +137,7 @@ def _enrich_single_lead_sync(name: str, company: str, city: str) -> dict:
             result["email"] = email
             return result
             
-    email = _search_email_directly_sync(name, city, company)
+    email = _search_email_directly_sync(name, city, company, license_type)
     if email:
         result["email"] = email
         
@@ -150,10 +171,11 @@ async def enrich_with_email(
         name = record.get("contractor_name", "")
         company = record.get("company_name", "")
         city = record.get("city", "")
+        license_type = record.get("license_type", "")
 
         try:
             enrichment_data = await asyncio.to_thread(
-                _enrich_single_lead_sync, name, company, city
+                _enrich_single_lead_sync, name, company, city, license_type
             )
             
             if enrichment_data["website"]:
