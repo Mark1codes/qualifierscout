@@ -18,7 +18,7 @@ SKIP_DOMAINS = {
     "twitter.com", "instagram.com", "youtube.com", "linkedin.com",
     "myfloridalicense.com", "nclbgc.org", "tdlr.texas.gov",
     "therealdeal.com", "wix.com", "squarespace.com", "wordpress.com",
-    "sentry-next.wixpress.com"
+    "sentry-next.wixpress.com", "adzep.com", "bizapedia.com"
 }
 
 def is_real_email(email: str) -> bool:
@@ -47,8 +47,10 @@ def _find_website_sync(name: str, company: str, city: str) -> str | None:
             url = r.get("href", "")
             skip = ["yelp.com", "bbb.org", "linkedin.com", "facebook.com",
                     "angi.com", "homeadvisor.com", "thumbtack.com",
-                    "yellowpages.com", "houzz.com", ".gov", "wikipedia", "buildzoom.com", "porch.com"]
-            if url and not any(s in url for s in skip):
+                    "yellowpages.com", "houzz.com", ".gov", "wikipedia", "buildzoom.com", "porch.com",
+                    "adzep.com", "youtube.com", "vimeo.com", "pinterest.com", "instagram.com", "tiktok.com",
+                    "realtor.com", "zillow.com", "mapquest.com", "bizapedia.com", "opencorporates.com"]
+            if url and not any(s in url.lower() for s in skip):
                 return url
     except Exception:
         pass
