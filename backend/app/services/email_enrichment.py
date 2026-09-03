@@ -126,8 +126,69 @@ def _search_email_directly_sync(name: str, city: str, company: str, license_type
     return None
 
 
+def has_valid_mx_record(domain: str) -> bool:
+    """Check if domain has active MX mail servers for FREE before calling ZeroBounce."""
+    if not domain or domain in SKIP_DOMAINS:
+        return False
+    try:
+        import dns.resolver
+        answers = dns.resolver.resolve(domain, 'MX')
+        return len(answers) > 0
+    except Exception:
+        try:
+            import socket
+            socket.gethostbyname(domain)
+            return True
+        except Exception:
+            return False
+
+
+def generate_email_candidates(name: str, company: str, city: str, license_type: str = "", website: str = "") -> list[str]:
+    """Generate high-probability email candidate variations."""
+    candidates = []
+    clean_name = _clean_name_for_email_search(name) if name else ""
+    parts = [p.lower() for p in clean_name.split() if len(p) > 1]
+
+    if len(parts) >= 2:
+        first = parts[0]
+        last = parts[-1]
+
+        # 1. Custom Domain Candidates (if website available)
+        if website:
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(website).netloc.replace("www.", "").strip()
+                if domain and domain not in SKIP_DOMAINS and has_valid_mx_record(domain):
+                    candidates.append(f"{first}@{domain}")
+                    candidates.append(f"{first}.{last}@{domain}")
+                    candidates.append(f"{first[0]}{last}@{domain}")
+                    candidates.append(f"info@{domain}")
+                    candidates.append(f"contact@{domain}")
+            except Exception:
+                pass
+
+        # 2. Public Provider Candidates (Gmail / Yahoo) with MX Shield
+        trade = license_type.split("-")[0].replace("Contractor", "").strip().lower().replace(" ", "") if license_type else ""
+        clean_city = city.lower().replace(" ", "") if city else ""
+
+        if trade:
+            candidates.append(f"{first}{last}{trade}@gmail.com")
+        if clean_city:
+            candidates.append(f"{first}{last}{clean_city}@gmail.com")
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_candidates = []
+    for c in candidates:
+        if c not in seen and is_real_email(c):
+            seen.add(c)
+            unique_candidates.append(c)
+
+    return unique_candidates
+
+
 def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: str = "") -> dict:
-    result = {"website": None, "email": None}
+    result = {"website": None, "email": None, "candidate_emails": []}
     
     website = _find_website_sync(name, company, city)
     if website:
@@ -140,6 +201,13 @@ def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: s
     email = _search_email_directly_sync(name, city, company, license_type)
     if email:
         result["email"] = email
+        return result
+
+    # Generate MX-shielded email candidates for ZeroBounce verification
+    candidates = generate_email_candidates(name, company, city, license_type, website or "")
+    if candidates:
+        result["candidate_emails"] = candidates
+        result["email"] = candidates[0]  # Set top candidate as primary proposal
         
     return result
 
