@@ -219,7 +219,12 @@ class OklahomaScraper:
             import asyncio
             if sys.platform == "win32":
                 asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-            return asyncio.run(self._scrape_with_playwright_internal(request, license_type, log))
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(self._scrape_with_playwright_internal(request, license_type, log))
+            finally:
+                new_loop.close()
 
         import asyncio
         try:
@@ -248,8 +253,14 @@ class OklahomaScraper:
                     if self._is_blocked(text):
                         raise RuntimeError(f"official portal blocked browser access with status {status}")
 
+                await page.wait_for_timeout(1_000)
                 await self._run_portal_search(page, request, license_type, log)
-                html = await page.content()
+                await page.wait_for_timeout(3_000)
+                try:
+                    html = await page.content()
+                except Exception:
+                    await page.wait_for_timeout(2_000)
+                    html = await page.content()
                 records = self._parse_records(html, request, license_type)
                 if not records:
                     raise RuntimeError("official portal rendered but returned no parseable records")
@@ -279,18 +290,23 @@ class OklahomaScraper:
         await self._fill_by_labels(page, ["state"], "OK")
 
         log(f"Submitting Oklahoma CIB search for {license_type} in {city or 'all cities'}...")
-        submit = page.locator("#btnSubmit, input[type='submit'], input[type='button']").first
-        if not await submit.count():
-            submit = page.get_by_role("button", name=re.compile(r"search|find|submit", re.I)).first
-        if not await submit.count():
+        submit = None
+        for selector in ["#btnSubmit", "input[name='btnSubmit']", "input[type='submit']", "button[type='submit']"]:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count():
+                    submit = locator
+                    break
+            except Exception:
+                continue
+        if not submit:
             raise RuntimeError("could not find Oklahoma CIB search submit control")
-        await submit.wait_for(state="visible", timeout=10_000)
-        await submit.evaluate("element => element.click()")
         try:
-            await page.wait_for_load_state("networkidle", timeout=45_000)
-        except Exception:
-            pass
-        await page.wait_for_timeout(3_000)
+            await submit.wait_for(state="visible", timeout=15_000)
+            await submit.click(timeout=10_000, force=True)
+        except Exception as e:
+            await page.keyboard.press("Enter")
+        await page.wait_for_load_state("networkidle", timeout=60_000)
 
     async def _select_option_by_text(self, page: Page, labels: list[str]) -> None:
         selects = page.locator("select")
@@ -569,7 +585,12 @@ class OklahomaScraper:
             import asyncio
             if sys.platform == "win32":
                 asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-            return asyncio.run(self._fetch_with_scraping_browser_internal(request, license_type, connection_url_or_key, log))
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(self._fetch_with_scraping_browser_internal(request, license_type, connection_url_or_key, log))
+            finally:
+                new_loop.close()
             
         import asyncio
         try:
@@ -593,8 +614,14 @@ class OklahomaScraper:
             
             try:
                 await page.goto(OFFICIAL_SEARCH_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(1_000)
                 await self._run_portal_search(page, request, license_type, log)
-                html = await page.content()
+                await page.wait_for_timeout(3_000)
+                try:
+                    html = await page.content()
+                except Exception:
+                    await page.wait_for_timeout(2_000)
+                    html = await page.content()
                 records = self._parse_records(html, request, license_type)
                 if not records:
                     raise RuntimeError("ZenRows browser rendered but returned no parseable records")
