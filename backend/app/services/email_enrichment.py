@@ -18,18 +18,23 @@ SKIP_DOMAINS = {
     "twitter.com", "instagram.com", "youtube.com", "linkedin.com",
     "myfloridalicense.com", "nclbgc.org", "tdlr.texas.gov",
     "therealdeal.com", "wix.com", "squarespace.com", "wordpress.com",
-    "sentry-next.wixpress.com", "adzep.com", "bizapedia.com"
+    "sentry-next.wixpress.com", "adzep.com", "bizapedia.com",
+    "stackoverflow.com", "t.me", "techora.ru", "imdb.com", "pingdom.com",
+    "fancyapps.com", "rutube.ru", "azquotes.com", "thecalculatorsite.com",
+    "webcamtoy.com", "consumeraffairs.com", "manta.com", "radaris.com",
+    "flyaero.com", "github.com", "reddit.com", "telegram.org", "wikipedia.org",
+    "address.com", "test.ru"
 }
 
 def is_real_email(email: str) -> bool:
     """Filter out obviously fake/system emails and image filenames."""
     lower = email.lower()
     domain = lower.split("@")[-1]
-    if domain in SKIP_DOMAINS:
+    if domain in SKIP_DOMAINS or any(skip_d in domain for skip_d in ["techora.ru", "rutube.ru", "t.me", "stackoverflow.com"]):
         return False
     if any(ext in lower for ext in [".png", ".jpg", ".jpeg", ".gif", ".svg", "@2x", "@3x", ".webp"]):
         return False
-    if any(x in lower for x in ["noreply", "no-reply", "donotreply", "example", "test@", "admin@", "support@", "sentry"]):
+    if any(x in lower for x in ["noreply", "no-reply", "donotreply", "example", "test@", "admin@", "support@", "sentry", "helpdesk@", "email@address"]):
         return False
     return True
 
@@ -39,20 +44,32 @@ def _find_website_sync(name: str, company: str, city: str) -> str | None:
     try:
         from ddgs import DDGS
         search_name = company if company else name
-        if not search_name:
+        if not search_name or len(search_name) < 3:
             return None
-        # Remove strict quotes which cause zero results on DDG
-        query = f'{search_name} {city} contractor website'
+        
+        query = f'"{search_name}" {city} contractor official website'
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=5))
+            
+        skip = ["yelp.com", "bbb.org", "linkedin.com", "facebook.com",
+                "angi.com", "homeadvisor.com", "thumbtack.com",
+                "yellowpages.com", "houzz.com", ".gov", "wikipedia", "buildzoom.com", "porch.com",
+                "adzep.com", "youtube.com", "vimeo.com", "pinterest.com", "instagram.com", "tiktok.com",
+                "realtor.com", "zillow.com", "mapquest.com", "bizapedia.com", "opencorporates.com",
+                "stackoverflow.com", "t.me", "techora.ru", "imdb.com", "pingdom.com",
+                "fancyapps.com", "rutube.ru", "azquotes.com", "thecalculatorsite.com",
+                "webcamtoy.com", "consumeraffairs.com", "manta.com", "radaris.com",
+                "flyaero.com", "github.com", "reddit.com", "telegram.org", "locanto.",
+                "squarespace.com", "wix.com", "wordpress.com", "blogspot.com", "weebly.com", ".pdf"]
+                
         for r in results:
             url = r.get("href", "")
-            skip = ["yelp.com", "bbb.org", "linkedin.com", "facebook.com",
-                    "angi.com", "homeadvisor.com", "thumbtack.com",
-                    "yellowpages.com", "houzz.com", ".gov", "wikipedia", "buildzoom.com", "porch.com",
-                    "adzep.com", "youtube.com", "vimeo.com", "pinterest.com", "instagram.com", "tiktok.com",
-                    "realtor.com", "zillow.com", "mapquest.com", "bizapedia.com", "opencorporates.com"]
-            if url and not any(s in url.lower() for s in skip):
+            if not url or any(s in url.lower() for s in skip):
+                continue
+                
+            # Verify the result text or domain looks like a real trade business
+            body = (r.get("title", "") + " " + r.get("body", "")).lower()
+            if any(term in body for term in ["contractor", "electric", "plumbing", "hvac", "mechanical", "heating", "air", "cooling", "construction", "service", "inc", "llc", "co"]):
                 return url
     except Exception:
         pass
@@ -64,26 +81,43 @@ def _search_buildzoom_sync(name: str, city: str, license_number: str = "") -> st
     try:
         from ddgs import DDGS
         clean_name = _clean_name_for_email_search(name) if name else ""
-        query = f'site:buildzoom.com "{license_number}" Oklahoma' if license_number else f'site:buildzoom.com "{clean_name}" {city}'
         
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=3))
-            
+        queries = []
+        if license_number:
+            queries.append(f'site:buildzoom.com "{license_number}" Oklahoma')
+        if clean_name:
+            queries.append(f'site:buildzoom.com "{clean_name}" {city}')
+
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        for r in results:
-            url = r.get("href", "")
-            if "buildzoom.com/contractor/" in url:
-                resp = httpx.get(url, headers=headers, timeout=5, follow_redirects=True)
-                if resp.status_code == 200:
-                    emails = EMAIL_REGEX.findall(resp.text)
-                    real_emails = [
-                        e for e in emails 
-                        if is_real_email(e) 
-                        and "buildzoom" not in e.lower() 
-                        and "blockrenovation" not in e.lower()
-                    ]
-                    if real_emails:
-                        return real_emails[0]
+        
+        for query in queries:
+            try:
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(query, max_results=3))
+            except Exception:
+                continue
+
+            for r in results:
+                url = r.get("href", "")
+                if "buildzoom.com/contractor/" in url:
+                    resp = httpx.get(url, headers=headers, timeout=6, follow_redirects=True)
+                    if resp.status_code == 200:
+                        emails = EMAIL_REGEX.findall(resp.text)
+                        real_emails = [
+                            e for e in emails 
+                            if is_real_email(e) 
+                            and "buildzoom" not in e.lower() 
+                            and "blockrenovation" not in e.lower()
+                            and "example.com" not in e.lower()
+                            and "email.com" not in e.lower()
+                        ]
+                        if real_emails:
+                            name_parts = [p.lower() for p in clean_name.split() if len(p) > 2]
+                            for e in real_emails:
+                                e_low = e.lower()
+                                if any(p in e_low for p in name_parts):
+                                    return e
+                            return real_emails[0]
     except Exception:
         pass
     return None
@@ -220,6 +254,13 @@ def generate_email_candidates(name: str, company: str, city: str, license_type: 
 def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: str = "", license_number: str = "") -> dict:
     result = {"website": None, "email": None, "candidate_emails": []}
     
+    # 1. Primary Priority: BuildZoom Contractor Registry Search
+    email = _search_buildzoom_sync(name, city, license_number)
+    if email:
+        result["email"] = email
+        return result
+
+    # 2. Secondary Priority: Official Company Website Scraper
     website = _find_website_sync(name, company, city)
     if website:
         result["website"] = website
@@ -227,20 +268,14 @@ def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: s
         if email:
             result["email"] = email
             return result
-            
-    # 1. Try BuildZoom Free Public Registry Scraper
-    email = _search_buildzoom_sync(name, city, license_number)
-    if email:
-        result["email"] = email
-        return result
 
-    # 2. Try Direct Web Email Search
+    # 3. Direct Web Search
     email = _search_email_directly_sync(name, city, company, license_type)
     if email:
         result["email"] = email
         return result
 
-    # 3. Generate MX-shielded email candidates for ZeroBounce verification
+    # 4. Generate MX-shielded email candidates for ZeroBounce verification
     candidates = generate_email_candidates(name, company, city, license_type, website or "")
     if candidates:
         result["candidate_emails"] = candidates
