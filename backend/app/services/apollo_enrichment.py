@@ -163,12 +163,19 @@ async def _enrich_single_apollo(
     return record, credits_used, should_drop
 
 
+ENABLE_APOLLO_ENRICHMENT = False  # Set to False to disable Apollo API credit usage
+
+
 async def enrich_with_apollo(
     records: List[Dict[str, Any]],
     log,
     batch_size: int = 3,
     run_id: int | None = None,
 ) -> List[Dict[str, Any]]:
+    if not ENABLE_APOLLO_ENRICHMENT or os.getenv("DISABLE_APOLLO", "").lower() in ("true", "1", "yes"):
+        log("[APOLLO ENRICHMENT] Apollo API enrichment is currently DISABLED (Out of Credits). Skipping Apollo step.", "info")
+        return records
+
     api_key = os.getenv("APOLLO_API_KEY", "").strip()
     if not api_key:
         log("No Apollo API key found in .env. Skipping premium enrichment.", "warning")
