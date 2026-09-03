@@ -82,7 +82,15 @@ def _search_buildzoom_sync(name: str, city: str, license_number: str = "") -> st
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         clean_name = _clean_name_for_email_search(name) if name else ""
 
-        name_parts = [p.lower() for p in clean_name.split() if len(p) > 2]
+        trade_stop_words = {
+            'electrical', 'electric', 'plumbing', 'plumber', 'mechanical', 'hvac', 'roofing',
+            'contractor', 'contractors', 'services', 'service', 'company', 'inc', 'llc', 'co', 
+            'group', 'solutions', 'construction', 'builder', 'builders', 'oklahoma', 'city'
+        }
+        name_parts = [
+            p.lower() for p in clean_name.split() 
+            if len(p) > 2 and p.lower() not in trade_stop_words
+        ]
 
         # 1. Direct Slug Resolution Attempt
         if clean_name:
@@ -100,7 +108,7 @@ def _search_buildzoom_sync(name: str, city: str, license_number: str = "") -> st
                         and "example.com" not in e.lower()
                         and "email.com" not in e.lower()
                     ]
-                    # STRICT MATCH: Must match contractor name parts to avoid sidebar false-positives
+                    # STRICT MATCH: Must match specific contractor name/company token (excluding generic trade words)
                     for e in real_emails:
                         e_low = e.lower()
                         if name_parts and any(p in e_low for p in name_parts):
@@ -137,7 +145,7 @@ def _search_buildzoom_sync(name: str, city: str, license_number: str = "") -> st
                             and "example.com" not in e.lower()
                             and "email.com" not in e.lower()
                         ]
-                        # STRICT MATCH: Must match contractor name parts to avoid sidebar false-positives
+                        # STRICT MATCH: Must match specific contractor name/company token (excluding generic trade words)
                         for e in real_emails:
                             e_low = e.lower()
                             if name_parts and any(p in e_low for p in name_parts):
