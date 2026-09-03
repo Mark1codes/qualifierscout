@@ -711,7 +711,7 @@ def insert_leads(run_id: int, records: list[dict]) -> None:
                     record.get("linkedin"),
                     record.get("title"),
                     record.get("source_url"),
-                    "verified" if record.get("quality_score", 0) >= 80 and record.get("email") else "needs_review",
+                    "verified" if (record.get("verification_status") == "verified" or (record.get("quality_score", 0) >= 65 and record.get("email"))) else "needs_review",
                     record.get("quality_score", 60),
                     record.get("duplicate_key"),
                     record.get("notes"),
