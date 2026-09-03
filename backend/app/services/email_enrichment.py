@@ -59,6 +59,36 @@ def _find_website_sync(name: str, company: str, city: str) -> str | None:
     return None
 
 
+def _search_buildzoom_sync(name: str, city: str, license_number: str = "") -> str | None:
+    """Scrape contractor profiles from BuildZoom 100% for free."""
+    try:
+        from ddgs import DDGS
+        clean_name = _clean_name_for_email_search(name) if name else ""
+        query = f'site:buildzoom.com "{license_number}" Oklahoma' if license_number else f'site:buildzoom.com "{clean_name}" {city}'
+        
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=3))
+            
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        for r in results:
+            url = r.get("href", "")
+            if "buildzoom.com/contractor/" in url:
+                resp = httpx.get(url, headers=headers, timeout=5, follow_redirects=True)
+                if resp.status_code == 200:
+                    emails = EMAIL_REGEX.findall(resp.text)
+                    real_emails = [
+                        e for e in emails 
+                        if is_real_email(e) 
+                        and "buildzoom" not in e.lower() 
+                        and "blockrenovation" not in e.lower()
+                    ]
+                    if real_emails:
+                        return real_emails[0]
+    except Exception:
+        pass
+    return None
+
+
 def _scrape_email_sync(website_url: str) -> str | None:
     """Scrape website for an email address."""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -187,7 +217,7 @@ def generate_email_candidates(name: str, company: str, city: str, license_type: 
     return unique_candidates
 
 
-def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: str = "") -> dict:
+def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: str = "", license_number: str = "") -> dict:
     result = {"website": None, "email": None, "candidate_emails": []}
     
     website = _find_website_sync(name, company, city)
@@ -198,12 +228,19 @@ def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: s
             result["email"] = email
             return result
             
+    # 1. Try BuildZoom Free Public Registry Scraper
+    email = _search_buildzoom_sync(name, city, license_number)
+    if email:
+        result["email"] = email
+        return result
+
+    # 2. Try Direct Web Email Search
     email = _search_email_directly_sync(name, city, company, license_type)
     if email:
         result["email"] = email
         return result
 
-    # Generate MX-shielded email candidates for ZeroBounce verification
+    # 3. Generate MX-shielded email candidates for ZeroBounce verification
     candidates = generate_email_candidates(name, company, city, license_type, website or "")
     if candidates:
         result["candidate_emails"] = candidates
@@ -240,10 +277,11 @@ async def enrich_with_email(
         company = record.get("company_name", "")
         city = record.get("city", "")
         license_type = record.get("license_type", "")
+        license_number = record.get("license_number", "")
 
         try:
             enrichment_data = await asyncio.to_thread(
-                _enrich_single_lead_sync, name, company, city, license_type
+                _enrich_single_lead_sync, name, company, city, license_type, license_number
             )
             
             if enrichment_data["website"]:
