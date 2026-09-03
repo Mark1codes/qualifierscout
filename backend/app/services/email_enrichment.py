@@ -254,29 +254,11 @@ def generate_email_candidates(name: str, company: str, city: str, license_type: 
 def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: str = "", license_number: str = "") -> dict:
     result = {"website": None, "email": None, "candidate_emails": []}
     
-    # 1. Primary Priority: BuildZoom Contractor Registry Search
+    # 100% BuildZoom Exclusive Mode: Extract email ONLY from official BuildZoom license profiles
     email = _search_buildzoom_sync(name, city, license_number)
     if email:
         result["email"] = email
-        return result
-
-    # 2. Secondary Priority: Official Company Website Scraper
-    website = _find_website_sync(name, company, city)
-    if website:
-        result["website"] = website
-        email = _scrape_email_sync(website)
-        if email:
-            result["email"] = email
-            return result
-
-    # 3. Direct Web Search
-    email = _search_email_directly_sync(name, city, company, license_type)
-    if email:
-        result["email"] = email
-        return result
-
-    # Strict Exact-Scraped-Only Mode: Zero synthetic guesses!
-    # If no 100% exact email was scraped from BuildZoom or website, return None.
+        
     return result
 
 
