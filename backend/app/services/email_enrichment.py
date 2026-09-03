@@ -275,12 +275,8 @@ def _enrich_single_lead_sync(name: str, company: str, city: str, license_type: s
         result["email"] = email
         return result
 
-    # 4. Generate MX-shielded email candidates for ZeroBounce verification
-    candidates = generate_email_candidates(name, company, city, license_type, website or "")
-    if candidates:
-        result["candidate_emails"] = candidates
-        result["email"] = candidates[0]  # Set top candidate as primary proposal
-        
+    # Strict Exact-Scraped-Only Mode: Zero synthetic guesses!
+    # If no 100% exact email was scraped from BuildZoom or website, return None.
     return result
 
 
