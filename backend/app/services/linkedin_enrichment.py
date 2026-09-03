@@ -10,6 +10,14 @@ import time
 from typing import Callable
 
 
+def _clean_person_name(raw_name: str) -> str:
+    """Extract First and Last name, removing middle initials/names."""
+    parts = [p for p in raw_name.strip().split() if len(p) > 1 and not p.endswith(".")]
+    if len(parts) >= 2:
+        return f"{parts[0]} {parts[-1]}"
+    return raw_name
+
+
 def _find_linkedin_sync(name: str, company: str, city: str, license_type: str) -> tuple[str, str]:
     """
     Synchronous search for a LinkedIn profile.
@@ -18,14 +26,16 @@ def _find_linkedin_sync(name: str, company: str, city: str, license_type: str) -
     try:
         from ddgs import DDGS
         trade = license_type.split("-")[0].strip() if "-" in license_type else license_type
+        clean_trade = trade.replace("Contractor", "").replace("License", "").strip()
         
         if name:
-            query = f'site:linkedin.com "{name}" {city} ({trade} OR construction)'
+            clean_name = _clean_person_name(name)
+            query = f'site:linkedin.com/in/ {clean_name} {city} {clean_trade} contractor'
         else:
             query = f'site:linkedin.com/in/ "{company}" (owner OR president OR CEO OR founder OR manager OR director)'
 
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=3))
+            results = list(ddgs.text(query, max_results=5))
 
         for result in results:
             url = result.get("href", "")
@@ -34,19 +44,16 @@ def _find_linkedin_sync(name: str, company: str, city: str, license_type: str) -
             
             if "linkedin.com/in/" in url:
                 if name:
-                    parts = [p.lower() for p in name.split() if len(p) > 2]
+                    clean_name = _clean_person_name(name)
+                    parts = [p.lower() for p in clean_name.split()]
                     title_lower = title.lower()
-                    if len(parts) >= 2:
-                        name_match = (parts[0] in title_lower) and (parts[1] in title_lower)
-                    elif len(parts) == 1:
-                        name_match = parts[0] in title_lower
-                    else:
-                        name_match = False
-
-                    trade_keywords = ["owner", "president", "construction", "contractor", "manager", "director", "infrastructure", "civil"]
-                    trade_match = any(kw in body or kw in title_lower for kw in trade_keywords)
                     
-                    if name_match and trade_match:
+                    if len(parts) >= 2:
+                        name_match = (parts[0] in title_lower or parts[0] in body) and (parts[-1] in title_lower or parts[-1] in body)
+                    else:
+                        name_match = parts[0] in title_lower or parts[0] in body
+
+                    if name_match:
                         return name, url
                 else:
                     # Discover person's name from title: 'Steven Reynolds - Shearwater Communications | LinkedIn'

@@ -22,10 +22,12 @@ SKIP_DOMAINS = {
 }
 
 def is_real_email(email: str) -> bool:
-    """Filter out obviously fake/system emails."""
+    """Filter out obviously fake/system emails and image filenames."""
     lower = email.lower()
     domain = lower.split("@")[-1]
     if domain in SKIP_DOMAINS:
+        return False
+    if any(ext in lower for ext in [".png", ".jpg", ".jpeg", ".gif", ".svg", "@2x", "@3x", ".webp"]):
         return False
     if any(x in lower for x in ["noreply", "no-reply", "donotreply", "example", "test@", "admin@", "support@", "sentry"]):
         return False
