@@ -13,18 +13,67 @@ from bs4 import BeautifulSoup
 
 from app.schemas import ScrapeStartRequest
 
-# Map our internal types to CSLB dropdown values
+# Map internal types & user inputs to exact CSLB dropdown values (CSLB uses hyphenated codes like C-20)
 CSLB_LICENSE_TYPES = {
     "General Contractor": "B",
     "Building Contractor": "B",
     "Residential Contractor": "B",
     "General Engineering": "A",
-    "Electrical Contractor": "C10",
-    "HVAC Contractor": "C20",
-    "Plumbing Contractor": "C36",
-    "Roofing Contractor": "C39",
+    "Electrical Contractor": "C-10",
+    "HVAC Contractor": "C-20",
+    "HVAC": "C-20",
+    "C20": "C-20",
+    "C-20": "C-20",
+    "Plumbing Contractor": "C-36",
+    "Roofing Contractor": "C-39",
+    "Insulation and Acoustical Contractor": "C-2",
+    "Insulation Contractor": "C-2",
+    "C2": "C-2",
+    "C-2": "C-2",
     "default": "B"
 }
+
+def get_cslb_license_code(raw_type: str) -> str:
+    """Robustly maps any license type string or code (e.g., 'C20', 'HVAC', 'C-2') to CSLB dropdown format."""
+    if not raw_type:
+        return "B"
+    clean = raw_type.strip().upper()
+
+    if "C20" in clean or "C-20" in clean or "HVAC" in clean or "HEATING" in clean or "AIR CONDITION" in clean:
+        return "C-20"
+    if "C10" in clean or "C-10" in clean or "ELECTRIC" in clean:
+        return "C-10"
+    if "C36" in clean or "C-36" in clean or "PLUMB" in clean:
+        return "C-36"
+    if "C39" in clean or "C-39" in clean or "ROOF" in clean:
+        return "C-39"
+    if "C2" in clean or "C-2" in clean or "INSULATION" in clean or "ACOUSTICAL" in clean:
+        return "C-2"
+    if "ENGINEER" in clean or clean == "A":
+        return "A"
+    if "SOLAR" in clean or "C46" in clean or "C-46" in clean:
+        return "C-46"
+    if "POOL" in clean or "C53" in clean or "C-53" in clean:
+        return "C-53"
+    if "MASONRY" in clean or "C29" in clean or "C-29" in clean:
+        return "C-29"
+    if "CONCRETE" in clean or "C8" in clean or "C-8" in clean:
+        return "C-8"
+    if "DRYWALL" in clean or "C9" in clean or "C-9" in clean:
+        return "C-9"
+    if "PAINTING" in clean or "C33" in clean or "C-33" in clean:
+        return "C-33"
+    if "GLAZING" in clean or "C17" in clean or "C-17" in clean:
+        return "C-17"
+    if "ELEVATOR" in clean or "C11" in clean or "C-11" in clean:
+        return "C-11"
+    if "FIRE" in clean or "C16" in clean or "C-16" in clean:
+        return "C-16"
+    if "DEMOLITION" in clean or "C21" in clean or "C-21" in clean:
+        return "C-21"
+
+    return CSLB_LICENSE_TYPES.get(raw_type, "B")
+
 
 BASE_URL = "https://www.cslb.ca.gov"
 SEARCH_URL = f"{BASE_URL}/OnlineServices/CheckLicenseII/ZipCodeSearch.aspx"
@@ -40,20 +89,20 @@ CORP_INDICATORS = {
 
 
 CA_CITY_ZIPS = {
-    "Los Angeles": "90012",
-    "San Francisco": "94102",
-    "San Diego": "92101",
-    "San Jose": "95113",
-    "Sacramento": "95814",
-    "Fresno": "93721",
-    "Oakland": "94612",
-    "Bakersfield": "93301",
-    "Anaheim": "92805",
-    "Santa Ana": "92701",
-    "Riverside": "92501",
-    "Stockton": "95202",
-    "Irvine": "92614",
-    "Long Beach": "90802",
+    "Los Angeles": ["90012", "90805", "90023", "90040", "90250", "91331"],
+    "Long Beach": ["90805", "90802", "90806", "90813"],
+    "San Francisco": ["94102", "94103", "94107", "94110"],
+    "San Diego": ["92101", "92105", "92110", "92115"],
+    "San Jose": ["95113", "95112", "95123"],
+    "Sacramento": ["95814", "95823", "95826"],
+    "Fresno": ["93721", "93722"],
+    "Oakland": ["94612", "94601"],
+    "Bakersfield": ["93301", "93307"],
+    "Anaheim": ["92805", "92801"],
+    "Santa Ana": ["92701", "92704"],
+    "Riverside": ["92501", "92503"],
+    "Stockton": ["95202", "95206"],
+    "Irvine": ["92614", "92618"],
 }
 
 
@@ -111,9 +160,10 @@ class CaliforniaScraper:
 
     async def _try_public_search(self, request: ScrapeStartRequest, log) -> list[dict]:
         """Direct HTTP search against California CSLB ASP.NET portal (Fast, Free, 0 Browser Overheads)."""
-        lic_type_code = CSLB_LICENSE_TYPES.get(request.license_type, CSLB_LICENSE_TYPES["default"])
+        lic_type_code = get_cslb_license_code(request.license_type)
         city = (request.city or "Los Angeles").title()
-        zip_code_param = CA_CITY_ZIPS.get(city, "90012")
+        city_zip_entry = CA_CITY_ZIPS.get(city, ["90012", "90805", "90023", "91761"])
+        zips_to_try = city_zip_entry if isinstance(city_zip_entry, list) else [city_zip_entry]
         
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -123,31 +173,34 @@ class CaliforniaScraper:
         try:
             import httpx
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                log(f"Querying California CSLB directly for {request.license_type} in {city} (Zip: {zip_code_param})...")
-                
-                # Step 1: Initial GET to fetch ASP.NET __VIEWSTATE
-                r1 = await client.get(SEARCH_URL, headers=headers)
-                if r1.status_code != 200:
-                    log(f"California CSLB GET status {r1.status_code}, trying ZenRows...", "warning")
-                    return await self._try_zenrows_search(request, log)
+                raw_items = []
+                for zip_code_param in zips_to_try:
+                    if len(raw_items) >= request.max_records:
+                        break
+                        
+                    log(f"Querying California CSLB directly for {request.license_type} in {city} (Zip: {zip_code_param})...")
+                    
+                    # Step 1: Initial GET to fetch ASP.NET __VIEWSTATE
+                    r1 = await client.get(SEARCH_URL, headers=headers)
+                    if r1.status_code != 200:
+                        continue
 
-                soup1 = BeautifulSoup(r1.text, "html.parser")
-                viewstate = soup1.find("input", id="__VIEWSTATE")
-                viewstate_gen = soup1.find("input", id="__VIEWSTATEGENERATOR")
-                event_val = soup1.find("input", id="__EVENTVALIDATION")
+                    soup1 = BeautifulSoup(r1.text, "html.parser")
+                    viewstate = soup1.find("input", id="__VIEWSTATE")
+                    viewstate_gen = soup1.find("input", id="__VIEWSTATEGENERATOR")
+                    event_val = soup1.find("input", id="__EVENTVALIDATION")
 
-                if not viewstate:
-                    log("California CSLB __VIEWSTATE element missing", "warning")
-                    return await self._try_zenrows_search(request, log)
+                    if not viewstate:
+                        continue
 
-                data = {
-                    "__VIEWSTATE": viewstate.get("value", ""),
-                    "__VIEWSTATEGENERATOR": viewstate_gen.get("value", "") if viewstate_gen else "",
-                    "__EVENTVALIDATION": event_val.get("value", "") if event_val else "",
-                    "ctl00$MainContent$txtZipCode": zip_code_param,
-                    "ctl00$MainContent$ddlLicenseType": lic_type_code,
-                    "ctl00$MainContent$btnZipCodeSearch": "Search"
-                }
+                    data = {
+                        "__VIEWSTATE": viewstate.get("value", ""),
+                        "__VIEWSTATEGENERATOR": viewstate_gen.get("value", "") if viewstate_gen else "",
+                        "__EVENTVALIDATION": event_val.get("value", "") if event_val else "",
+                        "ctl00$MainContent$txtZipCode": zip_code_param,
+                        "ctl00$MainContent$ddlLicenseType": lic_type_code,
+                        "ctl00$MainContent$btnZipCodeSearch": "Search"
+                    }
 
                 # Step 2: POST form payload
                 post_headers = dict(headers)
@@ -289,7 +342,7 @@ class CaliforniaScraper:
                 log("ZenRows API key not configured for California fallback.", "info")
                 return []
 
-            lic_type_code = CSLB_LICENSE_TYPES.get(request.license_type, CSLB_LICENSE_TYPES["default"])
+            lic_type_code = get_cslb_license_code(request.license_type)
             city = (request.city or "Los Angeles").title()
             zip_code_param = CA_CITY_ZIPS.get(city, "90012")
 

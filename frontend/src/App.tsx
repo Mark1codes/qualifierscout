@@ -125,6 +125,7 @@ const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
     "HVAC Contractor",
     "Plumbing Contractor",
     "Roofing Contractor",
+    "Insulation and Acoustical Contractor",
   ],
   Florida: [
     "General Contractor",
@@ -140,6 +141,7 @@ const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
     "C-53 Water Well Drilling",
     "R-53 Drilling",
     "Well Drilling Contractor",
+    "A General Engineering",
     "General Contractor",
     "Electrical Contractor",
     "Plumbing Contractor",

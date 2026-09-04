@@ -276,7 +276,7 @@ class OklahomaScraper:
         license_type: str,
         log,
     ) -> None:
-        await page.wait_for_load_state("networkidle", timeout=45_000)
+        await page.wait_for_timeout(2_000)
         body_text = await self._safe_body_text(page)
         if self._is_blocked(body_text):
             raise RuntimeError("Azure WAF bot check blocked the license form")
@@ -306,7 +306,10 @@ class OklahomaScraper:
             await submit.click(timeout=10_000, force=True)
         except Exception as e:
             await page.keyboard.press("Enter")
-        await page.wait_for_load_state("networkidle", timeout=60_000)
+        try:
+            await page.wait_for_selector("#dgLicensee, table", timeout=15_000)
+        except Exception:
+            await page.wait_for_timeout(4_000)
 
     async def _select_option_by_text(self, page: Page, labels: list[str]) -> None:
         selects = page.locator("select")

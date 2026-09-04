@@ -331,6 +331,53 @@ async def import_csv_leads(file: UploadFile = File(...)) -> dict:
     return {"status": "success", "imported_count": len(records), "run_id": run_id}
 
 
+def map_license_code(raw: str) -> str:
+    """Converts full license names to standard short codes like C20, C2, B, A, C10, C36, C39 for CSV export."""
+    if not raw:
+        return ""
+    val = str(raw).strip()
+    u = val.upper()
+
+    if "C20" in u or "C-20" in u or "HVAC" in u or "HEATING" in u or "AIR CONDITION" in u:
+        return "C20"
+    if "C2" in u or "C-2" in u or "INSULATION" in u or "ACOUSTICAL" in u:
+        return "C2"
+    if "C10" in u or "C-10" in u or "ELECTRIC" in u:
+        return "C10"
+    if "C36" in u or "C-36" in u or "PLUMB" in u:
+        return "C36"
+    if "C39" in u or "C-39" in u or "ROOF" in u:
+        return "C39"
+    if "GENERAL CONTRACTOR" in u or "BUILDING CONTRACTOR" in u or "RESIDENTIAL CONTRACTOR" in u or u == "B":
+        return "B"
+    if "GENERAL ENGINEERING" in u or u == "A":
+        return "A"
+    if "MECHANICAL" in u:
+        return "C20"
+    if "SOLAR" in u or "C46" in u or "C-46" in u:
+        return "C46"
+    if "POOL" in u or "C53" in u or "C-53" in u:
+        return "C53"
+    if "MASONRY" in u or "C29" in u or "C-29" in u:
+        return "C29"
+    if "CONCRETE" in u or "C8" in u or "C-8" in u:
+        return "C8"
+    if "DRYWALL" in u or "C9" in u or "C-9" in u:
+        return "C9"
+    if "PAINTING" in u or "C33" in u or "C-33" in u:
+        return "C33"
+    if "GLAZING" in u or "C17" in u or "C-17" in u:
+        return "C17"
+    if "ELEVATOR" in u or "C11" in u or "C-11" in u:
+        return "C11"
+    if "FIRE" in u or "C16" in u or "C-16" in u:
+        return "C16"
+    if "DEMOLITION" in u or "C21" in u or "C-21" in u:
+        return "C21"
+
+    return val
+
+
 @app.post("/export")
 def export_leads(request: ExportRequest) -> FileResponse:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -453,12 +500,13 @@ def export_leads(request: ExportRequest) -> FileResponse:
             words = set(re.findall(r"\b[A-Za-z0-9]+\b", comp.upper()))
             if not (words & corp_indicators):
                 last, first = [part.strip() for part in comp.split(",", 1)]
-                if fullname and f"{first} {last}".lower() == fullname.lower():
-                    return ""
         return comp.title()
 
     df["company_name"] = df.apply(clean_export_company, axis=1)
     
+    if "license_type" in df.columns:
+        df["license_type"] = df["license_type"].apply(map_license_code)
+
     # Map headers to exact requested format
     header_mapping = {
         "license_type": "Code",
@@ -522,7 +570,7 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
         set_run_status(run_id, "running", 50)
         
         if request.enrich_leads:
-            log(f"⚡ Starting Turbo Enrichment Pipeline for {len(records)} new leads...")
+            log(f"[TURBO ENRICHMENT] Starting Turbo Enrichment Pipeline for {len(records)} new leads...")
             
             from app.services.linkedin_enrichment import enrich_with_linkedin
             log("Running Ghost Hunter decision-maker discovery & LinkedIn search...")
@@ -558,8 +606,8 @@ async def run_scrape(run_id: int, request: ScrapeStartRequest) -> None:
         from app.db.database import get_run_api_credits, get_total_api_credits
         run_credits = get_run_api_credits(run_id)
         total_credits = get_total_api_credits()
-        log(f"💳 [CREDIT SUMMARY THIS RUN] Apollo Credits Used: {run_credits['apollo_credits']} | ZeroBounce Credits Used: {run_credits['zerobounce_credits']} (Apollo API Searches: {run_credits['apollo_requests']})", "info")
-        log(f"📊 [TOTAL LIFETIME CREDITS] Total Apollo Credits Used: {total_credits['apollo_credits']} | Total ZeroBounce Credits Used: {total_credits['zerobounce_credits']}", "info")
+        log(f"[CREDIT SUMMARY THIS RUN] Apollo Credits Used: {run_credits['apollo_credits']} | ZeroBounce Credits Used: {run_credits['zerobounce_credits']} (Apollo API Searches: {run_credits['apollo_requests']})", "info")
+        log(f"[TOTAL LIFETIME CREDITS] Total Apollo Credits Used: {total_credits['apollo_credits']} | Total ZeroBounce Credits Used: {total_credits['zerobounce_credits']}", "info")
 
         set_run_status(run_id, "completed", 100)
         log("Scrape completed.")
@@ -606,7 +654,7 @@ async def run_enrich_existing(run_id: int, request: EnrichExistingRequest) -> No
             set_run_status(run_id, "completed", 100)
             return
 
-        log(f"Found {len(records)} un-enriched leads in database. ⚡ Starting Turbo Enrichment Pipeline...")
+        log(f"Found {len(records)} un-enriched leads in database. Starting Turbo Enrichment Pipeline...")
         set_run_status(run_id, "running", 25)
 
         from app.services.linkedin_enrichment import enrich_with_linkedin
@@ -663,8 +711,8 @@ async def run_enrich_existing(run_id: int, request: EnrichExistingRequest) -> No
         from app.db.database import get_run_api_credits, get_total_api_credits
         run_credits = get_run_api_credits(run_id)
         total_credits = get_total_api_credits()
-        log(f"💳 [CREDIT SUMMARY THIS RUN] Apollo Credits Used: {run_credits['apollo_credits']} | ZeroBounce Credits Used: {run_credits['zerobounce_credits']} (Apollo API Searches: {run_credits['apollo_requests']})", "info")
-        log(f"📊 [TOTAL LIFETIME CREDITS] Total Apollo Credits Used: {total_credits['apollo_credits']} | Total ZeroBounce Credits Used: {total_credits['zerobounce_credits']}", "info")
+        log(f"[CREDIT SUMMARY THIS RUN] Apollo Credits Used: {run_credits['apollo_credits']} | ZeroBounce Credits Used: {run_credits['zerobounce_credits']} (Apollo API Searches: {run_credits['apollo_requests']})", "info")
+        log(f"[TOTAL LIFETIME CREDITS] Total Apollo Credits Used: {total_credits['apollo_credits']} | Total ZeroBounce Credits Used: {total_credits['zerobounce_credits']}", "info")
 
         set_run_status(run_id, "completed", 100)
         log(f"Successfully enriched {len(records)} existing database leads!")
