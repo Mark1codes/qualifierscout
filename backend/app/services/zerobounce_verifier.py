@@ -135,8 +135,9 @@ async def verify_emails_with_zerobounce(
                 records[idx]["verification_status"] = verification_status
                 if verification_status == "Verified":
                     valid_count += 1
-                elif verification_status == "Invalid":
-                    records[idx]["email"] = ""  # Clear invalid email to prevent bounces
+                else:
+                    # Clear non-valid emails (Catch-All, Invalid, etc.) so ONLY strictly ZeroBounce Valid emails remain
+                    records[idx]["email"] = ""
                     invalid_count += 1
 
             # Log progress every 2 batches
