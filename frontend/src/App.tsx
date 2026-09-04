@@ -150,6 +150,7 @@ const LICENSE_TYPES_BY_STATE: Record<string, string[]> = {
     "Solar Contractor",
   ],
   Oklahoma: [
+    "Roofing Contractor",
     "Electrical Contractor",
     "Plumbing Contractor",
     "Mechanical Contractor",

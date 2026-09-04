@@ -19,6 +19,11 @@ OFFICIAL_SEARCH_URL = (
     "LicenseeSearch/LicenseeSearch.aspx"
 )
 OK_LICENSE_TYPES = {
+    "Roofing Contractor": [
+        "Roofing Contractor",
+        "Roofing Contractor Registration",
+        "Roofing",
+    ],
     "Electrical Contractor": [
         "Electrical Contractor",
         "Electrical Contractor License",
@@ -171,6 +176,11 @@ class OklahomaScraper:
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
     async def scrape(self, request: ScrapeStartRequest, run_id: int, log) -> list[dict]:
+        clean_type = clean_text(request.license_type).lower()
+        if "roof" in clean_type or "c39" in clean_type:
+            from app.scrapers.oklahoma_roofing import OklahomaRoofingScraper
+            return await OklahomaRoofingScraper(self.raw_dir).scrape(request, run_id, log)
+
         license_type = normalize_oklahoma_license_type(request.license_type)
         records: list[dict] = []
         failures: list[str] = []
