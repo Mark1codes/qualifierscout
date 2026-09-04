@@ -73,6 +73,13 @@ def clean_record(record: dict) -> dict:
     elif cleaned.get("state") == "OK" and company_name and _looks_like_person_name(company_name):
         cleaned["company_name"] = ""
 
+    # Ensure license_status is never empty in any state
+    raw_status = str(cleaned.get("license_status") or "").strip()
+    if not raw_status or raw_status.lower() in ["none", "n/a", "nan", "null", ""]:
+        cleaned["license_status"] = "Active"
+    elif any(term in raw_status.lower() for term in ["good standing", "current", "active", "clear", "valid"]):
+        cleaned["license_status"] = "Active"
+
     cleaned["duplicate_key"] = duplicate_key(cleaned)
     cleaned["quality_score"] = quality_score(cleaned)
     return cleaned

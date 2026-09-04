@@ -507,6 +507,16 @@ def export_leads(request: ExportRequest) -> FileResponse:
     if "license_type" in df.columns:
         df["license_type"] = df["license_type"].apply(map_license_code)
 
+    if "license_status" in df.columns:
+        def normalize_export_status(raw):
+            val = str(raw or "").strip()
+            if not val or val.lower() in ["none", "n/a", "nan", "null", ""]:
+                return "Active"
+            if any(term in val.lower() for term in ["good standing", "current", "active", "clear", "valid"]):
+                return "Active"
+            return val.title()
+        df["license_status"] = df["license_status"].apply(normalize_export_status)
+
     # Map headers to exact requested format
     header_mapping = {
         "license_type": "Code",
